@@ -5,7 +5,7 @@ from http import HTTPMethod
 @dataclass
 class ServerConfig:
     dir : str = "./api"
-    max_payload : int = 4096
+    max_request_size : int = 4096
 
 class Request:
     method : HTTPMethod

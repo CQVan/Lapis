@@ -29,7 +29,7 @@ class Server:
                 if self.s in readable:
 
                     client, (return_ip, _) = self.s.accept()
-                    data = client.recv(self.cfg.max_payload)
+                    data = client.recv(self.cfg.max_request_size)
 
                     current_datetime = datetime.now()
                     current_time = current_datetime.strftime("%H:%M:%S")
@@ -50,8 +50,6 @@ class Server:
                 self.s.close()
             except Exception as e:
                 print(f"Error when closing socket: {e}")
-
-
 
 server = Server()
 
