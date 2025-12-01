@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
+from http import HTTPMethod
 
 @dataclass
 class ServerConfig:
     dir : str = "./api"
 
 class Request:
-    method : str
+    method : HTTPMethod
     headers : dict[str, any] = {}
     base_url : str
     protocol : str
@@ -21,7 +22,8 @@ class Request:
 
         headers = head.splitlines()
         request_line = headers.pop(0)
-        self.method, url, self.protocol = request_line.split(' ', 3)
+        method, url, self.protocol = request_line.split(' ', 3)
+        self.method = HTTPMethod[method.upper()]
 
         for header in headers:
             key, value = header.split(':', 1)

@@ -27,12 +27,12 @@ class Server:
                 readable, _, _ = select.select([self.s], [], [], 0.1)
                 if self.s in readable:
 
-                    client, _ = self.s.accept()
+                    client, (returnIP, returnPort) = self.s.accept()
                     data = client.recv(4096)
 
                     request : Request = Request(data=data)
 
-                    
+                    print(f"{request.method} {request.base_url} {returnIP}")
 
         except KeyboardInterrupt:
             pass
