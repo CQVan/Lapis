@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qsl
 from http import HTTPMethod
 
 @dataclass
@@ -40,5 +40,5 @@ class Request:
 
         parsed = urlparse(url)
         self.base_url = parsed.path
-        self.query_params = parse_qs(parsed.query)
+        self.query_params = dict(parse_qsl(parsed.query))
         pass

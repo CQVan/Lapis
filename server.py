@@ -14,6 +14,7 @@ class Server:
     def __init__(self, config : ServerConfig | None = None):
         if config is not None:
             self.cfg = config
+
         pass
 
     def run(self, ip: str, port: int):
@@ -37,6 +38,8 @@ class Server:
                     request : Request = Request(data=data)
 
                     print(f"{current_time} {request.method} {request.base_url} {return_ip}")
+
+                    
 
         except KeyboardInterrupt:
             pass
