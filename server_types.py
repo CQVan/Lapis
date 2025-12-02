@@ -1,11 +1,32 @@
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qsl
-from http import HTTPMethod
+from http import HTTPMethod, HTTPStatus
 
 @dataclass
 class ServerConfig:
-    dir : str = "./api"
+    dir : str = "./api/"
     max_request_size : int = 4096
+    server_name : str = "Server"
+
+class Response:
+    status_code : HTTPStatus = 100
+    protocol : str = 'HTTP/1.1'
+    cookies : dict[str, any] = {}
+    headers : dict[str, any] = {}
+    body : str = ""
+
+    def __init__(self):
+        pass
+
+    # TODO: Implement
+    def to_bytes(self) -> bytes:
+
+        return b"""HTTP/1.1 200 OK\r
+                Content-Type: text/plain\r
+                Content-Length: 13\r
+                \r
+                Hello, world!"""
+
 
 class Request:
     method : HTTPMethod
