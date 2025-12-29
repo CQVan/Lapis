@@ -64,6 +64,8 @@ class Request:
         self.headers = {}
         self.cookies = {}
 
+        self.slugs = {}
+
         for line in lines[1:]:
             if ":" not in line:
                 raise BadRequest("Malformed header")

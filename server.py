@@ -41,24 +41,37 @@ class Server:
         finally:
             self.__close()
 
+    def _get_dynamic_dirs(self, directory: pathlib.Path):
+        return [
+            p for p in directory.iterdir()
+            if p.is_dir() and p.name.startswith("[") and p.name.endswith("]")
+        ]
 
     def _bake_paths(self) -> dict:
-        # 1. Setup root and script target
+
         root = pathlib.Path(self.cfg.dir)
         script_file_name = f"{self.cfg.path_script_name}.py"
         result = {}
 
-        # 2. Recursively find all target files (e.g., path.py)
         for path in root.rglob(script_file_name):
             if not path.is_file():
                 continue
 
-            # 3. Build/Navigate the nested dictionary based on folder structure
             parts = path.relative_to(root).parts
             current_level = result
+            current_fs_level = root
             
-            # We iterate through parts[:-1] to navigate folders, not the file itself
             for part in parts[:-1]:
+                dynamic_dirs = self._get_dynamic_dirs(current_fs_level)
+                if len(dynamic_dirs) > 1:
+                    raise RuntimeError(
+                        f"Multiple dynamic route folders in {current_fs_level}: "
+                        f"{', '.join(d.name for d in dynamic_dirs)}"
+                    )
+
+                # move filesystem pointer
+                current_fs_level = current_fs_level / part
+
                 current_level = current_level.setdefault(part, {})
 
             script_globals = runpy.run_path(str(path.absolute()))
@@ -94,20 +107,27 @@ class Server:
                 path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
                 parts = path.relative_to(self.cfg.dir).parts
                 
-                leaf = None
+                slugs : dict[str,str] = {}
+
+                leaf : dict = self.paths
                 for part in parts:
-                    leaf = self.paths[part]
+                    if part in leaf:
+                        leaf = leaf[part]
+                    else:
+                        dynamicRoutes: list[str] = list({k: v for k, v in leaf.items() if k.startswith('[') and k.endswith(']')})
+                        if len(dynamicRoutes) == 1:
+                            request.slugs[dynamicRoutes[0].strip("[]")] = part
+                            leaf = leaf[dynamicRoutes[0]]
+                        else:
+                            raise FileNotFoundError()
+                            
 
                 if f"/{request.method}" in leaf:
                     response : Response = asyncio.run(leaf[f"/{request.method}"](request))
                     self.__send_response(client, response)
-
-                # TODO: Add slugs
                 else:
                     raise FileNotFoundError()
-
-                pass
-
+                
             except FileNotFoundError:
                 response : Response = Response(status_code=404, body="404 Not Found")
                 self.__send_response(client, response)
