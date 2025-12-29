@@ -16,12 +16,11 @@ class Server:
     paths: dict = {}
 
     def __init__(self, config: ServerConfig | None = None):
+
         if config is not None:
             self.cfg = config
 
-        print("Baking Paths...")
         self.paths = self._bake_paths()
-        print(self.paths)
 
     def run(self, ip: str, port: int):
         self.s = socket.socket()
@@ -105,10 +104,8 @@ class Server:
             try:
 
                 path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
-                parts = path.relative_to(self.cfg.dir).parts
+                parts : list[str] = path.relative_to(self.cfg.dir).parts
                 
-                slugs : dict[str,str] = {}
-
                 leaf : dict = self.paths
                 for part in parts:
                     if part in leaf:
