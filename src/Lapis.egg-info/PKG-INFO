@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: Lapis
+Version: 0.1.0
+Summary: A small example package
+Author: Chandler Van
+Project-URL: Homepage, https://github.com/CQVan/Lapis
+Project-URL: Issues, https://github.com/CQVan/Lapis/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Classifier: License :: OSI Approved :: MIT License
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE.bak
+Dynamic: license-file

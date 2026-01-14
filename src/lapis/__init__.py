@@ -1,1 +1,1 @@
-__all__ = ["Lapis"]
+from .lapis import Lapis

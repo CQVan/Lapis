@@ -1,0 +1,10 @@
+LICENSE.bak
+README.md
+pyproject.toml
+src/Lapis.egg-info/PKG-INFO
+src/Lapis.egg-info/SOURCES.txt
+src/Lapis.egg-info/dependency_links.txt
+src/Lapis.egg-info/top_level.txt
+src/lapis/__init__.py
+src/lapis/lapis.py
+src/lapis/server_types.py

@@ -1,0 +1,1 @@
+Lapis is a file-based REST API framework inspired by Vercel functions
