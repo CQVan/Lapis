@@ -118,17 +118,17 @@ class Lapis:
                     if part in leaf:
                         leaf = leaf[part]
                     else:
-                        dynamicRoutes: list[str] = list(
+                        dynamic_routes: list[str] = list(
                             {
                                 key
                                 for key in leaf
                                 if key.startswith("[") and key.endswith("]")
                             }
                         )
-                        
-                        if len(dynamicRoutes) == 1:
-                            request.slugs[dynamicRoutes[0].strip("[]")] = part
-                            leaf = leaf[dynamicRoutes[0]]
+
+                        if len(dynamic_routes) == 1:
+                            request.slugs[dynamic_routes[0].strip("[]")] = part
+                            leaf = leaf[dynamic_routes[0]]
                         else:
                             raise FileNotFoundError()
                             

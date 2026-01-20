@@ -14,16 +14,14 @@ class Response:
     def __init__(self, 
                  status_code : int | HTTPStatus = HTTPStatus.OK, 
                  body : str = "",
-                 protocol : str = 'HTTP/1.1', 
                  headers : dict[str, any] = None, 
-                 cookies : dict[str, any] = None, 
                  ):
         self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
-        self.protocol = protocol
+        self.protocol = "HTTP/1.1"
         self.headers = headers if headers is not None else {
             "Content-Type": "text/plain",
         }
-        self.cookies = cookies if cookies is not None else {}
+        self.cookies = {}
         self.body = body
 
     @property
