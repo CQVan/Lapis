@@ -1,7 +1,6 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterator
-from urllib.parse import urlparse, parse_qsl
-from http import HTTPMethod, HTTPStatus
+import socket
 
 @dataclass
 class ServerConfig:
@@ -9,93 +8,58 @@ class ServerConfig:
     max_request_size : int = 4096
     server_name : str = "Server"
     path_script_name : str = "path"
-
-class Response:
-    def __init__(self, 
-                 status_code : int | HTTPStatus = HTTPStatus.OK, 
-                 body : str = "",
-                 headers : dict[str, any] = None, 
-                 ):
-        self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
-        self.protocol = "HTTP/1.1"
-        self.headers = headers if headers is not None else {
-            "Content-Type": "text/plain",
-        }
-        self.cookies = {}
-        self.body = body
-
-    @property
-    def reason_phrase(self):
-        return self.status_code.phrase
-
-    def set_cookie(self, key, value):
-        self.cookies[key] = value
-
-    def add_header(self, key, value):
-        self.headers[key] = value
-
-    def to_bytes(self):
-        body_bytes = self.body.encode('utf-8')
-        if "Content-Length" not in self.headers:
-            self.headers["Content-Length"] = len(body_bytes)
-
-        response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
-        headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
-        cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
-
-        return (response_line + headers + cookies + "\r\n").encode('utf-8') + body_bytes
-
-class StreamedResponse(Response):
-    
-    method : Iterator[str]
-
-    def __init__(self, method : Iterator[str], status_code = HTTPStatus.OK, protocol = 'HTTP/1.1', headers = None, cookies = None, body = ""):
-        super().__init__(status_code, protocol, headers, cookies, body)
-        headers["Cache-Control"] = "no-cache"
-        headers["Connection"] = "keep-alive"
-        headers["Content-Type"] = "text/event-stream"
-
-        self.iterator = method
-    pass
     
 class BadRequest(Exception):
     pass
 
-class Request:
-    def __init__(self, data: bytes):
-        try:
-            text = data.decode("iso-8859-1")
-        except UnicodeDecodeError:
-            raise BadRequest("Invalid encoding")
+class Protocol(ABC):
+    """
+    An abstract class used for the server to be able to handle different protocals (ex: HTTP/1.1)
+    """
 
-        if "\r\n\r\n" not in text:
-            raise BadRequest("Malformed HTTP request")
+    @classmethod
+    @abstractmethod
+    def get_target_endpoints() -> list[str]:
+        '''
+        :return: A list of all possible target function names of the protocol
+        :rtype: list[str]
+        '''
+        pass
 
-        head, body = text.split("\r\n\r\n", 1)
-        lines = head.split("\r\n")
+    @abstractmethod
+    def identify(self, initial_data: bytes) -> bool:
+        """
+        Function called so see if initial request is attempting to upgrade to the given protocol
+        
+        :param initial_data: The initial request from the client
+        :type initial_data: bytes
+        :return: If the initial request is for the given protocol
+        :rtype: bool
+        """
+        pass
 
-        method, url, protocol = lines[0].split(" ", 2)
-        self.method = HTTPMethod[method.upper()]
+    @abstractmethod
+    def handshake(self, client : socket.socket) -> bool:
+        '''
+        Handles the transfering logic between the initial protocol (HTTP/1.1) to the new protocol
+        
+        :param client: The socket connecting the server to the client
+        :type client: socket.socket
+        :return: If the handshake was successful
+        :rtype: bool
+        '''
+        pass
 
-        if protocol not in ("HTTP/1.0", "HTTP/1.1"):
-            raise BadRequest("Unsupported protocol")
-
-        self.protocol = protocol
-        self.headers = {}
-        self.cookies = {}
-
-        self.slugs = {}
-
-        for line in lines[1:]:
-            if ":" not in line:
-                raise BadRequest("Malformed header")
-            key, value = line.split(":", 1)
-            self.headers[key.strip()] = value.strip()
-
-        if protocol == "HTTP/1.1" and "Host" not in self.headers:
-            raise BadRequest("Missing Host header")
-
-        parsed = urlparse(url)
-        self.base_url = parsed.path
-        self.query_params = dict(parse_qsl(parsed.query))
-        self.body = body
+    @abstractmethod
+    def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict):
+        '''
+        Handles the protocol logic and server to client communication
+        
+        :param client: The socket connecting the server to the client
+        :type client: socket.socket
+        :param slugs: Any slugs in the url used to reach the endpoints
+        :type slugs: dict[str, str]
+        :param endpoints: All endpoints of a given url
+        :type endpoints: dict
+        '''
+        pass
