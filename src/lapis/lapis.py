@@ -6,7 +6,6 @@ The main script for the Lapis server handling initial request handling and respo
 
 import select
 import socket
-import asyncio
 import pathlib
 import runpy
 import sys
@@ -14,7 +13,7 @@ from threading import Thread
 from datetime import datetime
 
 from lapis.protocals.http1 import HTTP1Protocal, Request, Response
-from .server_types import Protocol, ServerConfig
+from .server_types import BadRequest, Protocol, ServerConfig
 from http import HTTPMethod
 
 class Lapis:
@@ -22,6 +21,7 @@ class Lapis:
     cfg: ServerConfig = ServerConfig()
 
     paths: dict = {}
+    __taken_endpoints : list[str] = []
     __protocals : list[type[Protocol]] = []
 
     def __init__(self, config: ServerConfig | None = None):
@@ -51,7 +51,12 @@ class Lapis:
             self.__close()
 
     def register_protocal(self, protocal : type[Protocol]):
+        endpoints : list[str] = protocal.get_target_endpoints()
+        if bool(set(endpoints) & set(self.__taken_endpoints)):
+            raise Exception("Cannot reuse target endpoint method!")
+
         self.__protocals.insert(0, protocal)
+        self.__taken_endpoints.extend(endpoints)
         pass
 
     def _get_dynamic_dirs(self, directory: pathlib.Path):
@@ -133,14 +138,36 @@ class Lapis:
                 if len(leaf) == 0:
                     raise FileExistsError()
                 
+                found_protocol : bool = False
+                
                 for p in self.__protocals:
                     protocal : Protocol = p()
 
                     if protocal.identify(initial_data=data):
+                        found_protocol = True
                         if protocal.handshake(client=client):
-                            protocal.handle(client=client, slugs=request.slugs, endpoints=leaf)
+
+                            target_endpoints = p.get_target_endpoints()
+
+                            endpoints = {
+                                f"/{k}": leaf[f"/{k}"]
+                                for k in target_endpoints
+                                if f"/{k}" in leaf
+                            }
+
+                            protocal.handle(client=client, slugs=request.slugs, endpoints=endpoints)
+                            break
+                        else: 
+                            break
                     pass
                 
+                if not found_protocol:
+                    raise BadRequest()
+            
+            except BadRequest as e:
+                response : Response = Response(status_code=400, body="400 Bad Request")
+                self.__send_response(client=client, response=response)
+
             except FileNotFoundError:
                 response : Response = Response(status_code=404, body="404 Not Found")
                 self.__send_response(client, response)

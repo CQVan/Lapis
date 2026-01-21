@@ -5,7 +5,7 @@ from http import HTTPMethod, HTTPStatus
 import socket
 from urllib.parse import parse_qsl, urlparse
 
-from lapis.server_types import Protocol
+from lapis.server_types import BadRequest, Protocol
 
 class Response:
     def __init__(self, 
@@ -41,9 +41,6 @@ class Response:
         cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
 
         return (response_line + headers + cookies + "\r\n").encode('utf-8') + body_bytes
-    
-class BadRequest(Exception):
-    pass
 
 class Request:
     def __init__(self, data: bytes):
@@ -88,6 +85,9 @@ class HTTP1Protocal(Protocol):
 
     request : Request = None
 
+    def get_target_endpoints() -> list[str]:
+        return [method.name for method in HTTPMethod]
+
     def identify(self, initial_data):
         try: 
             self.request = Request(initial_data)
@@ -106,9 +106,13 @@ class HTTP1Protocal(Protocol):
         if f"/{self.request.method}" in endpoints:
             response : Response = asyncio.run(endpoints[f"/{self.request.method}"](self.request))
             client.sendall(response.to_bytes())
+            
             current_time = datetime.now().strftime("%H:%M:%S")
             peer = client.getpeername()
             ip = peer[0]
+
             print(f"{current_time} {response.status_code.value} -> {ip}")
+        else:
+            raise FileNotFoundError()
 
     pass
