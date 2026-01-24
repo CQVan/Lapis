@@ -4,6 +4,8 @@ Docstring for lapis.lapis
 The main script for the Lapis server handling initial request handling and response
 """
 
+import asyncio
+import inspect
 import select
 import socket
 import pathlib
@@ -198,11 +200,19 @@ class Lapis:
                     if f"/{k}" in leaf 
                 }
 
-                protocol.handle(
-                    client=client,
-                    slugs=request.slugs,
-                    endpoints=endpoints,
-                )
+                if inspect.iscoroutinefunction(protocol.handle):
+                    asyncio.run(protocol.handle(
+                        client=client,
+                        slugs=request.slugs,
+                        endpoints=endpoints,
+                    ))
+                else:
+                    protocol.handle(
+                        client=client,
+                        slugs=request.slugs,
+                        endpoints=endpoints,
+                    )
+                
                 break
             else:
                 raise BadRequest()

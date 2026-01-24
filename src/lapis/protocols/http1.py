@@ -3,46 +3,18 @@ import asyncio
 from datetime import datetime
 from http import HTTPMethod, HTTPStatus
 import socket
+from typing import AsyncGenerator, Callable
 from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
 
-class Response:
-    def __init__(self, 
-                 status_code : int | HTTPStatus = HTTPStatus.OK, 
-                 body : str = "",
-                 headers : dict[str, any] = None, 
-                 ):
-        self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
-        self.protocol = "HTTP/1.1"
-        self.headers = headers if headers is not None else {
-            "Content-Type": "text/plain",
-        }
-        self.cookies = {}
-        self.body = body
-
-    @property
-    def reason_phrase(self):
-        return self.status_code.phrase
-
-    def set_cookie(self, key, value):
-        self.cookies[key] = value
-
-    def add_header(self, key, value):
-        self.headers[key] = value
-
-    def to_bytes(self):
-        body_bytes = self.body.encode('utf-8')
-        if "Content-Length" not in self.headers:
-            self.headers["Content-Length"] = len(body_bytes)
-
-        response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
-        headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
-        cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
-
-        return (response_line + headers + cookies + "\r\n").encode('utf-8') + body_bytes
 
 class Request:
+
+    """
+    The object class for handling HTTP 1/1.1 requests from clients
+    """
+
     def __init__(self, data: bytes):
         try:
             text = data.decode("iso-8859-1")
@@ -85,7 +57,67 @@ class Request:
         self.query_params = dict(parse_qsl(parsed.query))
         self.body = body
 
+class Response:
+
+    """
+    The object class for forming a HTTP 1/1.1 response to the client from the server
+    """
+
+    def __init__(self, 
+                 status_code : int | HTTPStatus = HTTPStatus.OK, 
+                 body : str = "",
+                 headers : dict[str, any] = None, 
+                 ):
+        self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
+        self.protocol = "HTTP/1.1"
+        self.headers = headers if headers is not None else {
+            "Content-Type": "text/plain",
+        }
+        self.cookies = {}
+        self.body = body
+
+    @property
+    def reason_phrase(self):
+        return self.status_code.phrase
+
+    def to_bytes(self):
+        body_bytes = self.body.encode('utf-8')
+        if "Content-Length" not in self.headers:
+            self.headers["Content-Length"] = len(body_bytes)
+
+        response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
+        headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
+        cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
+
+        return (response_line + headers + cookies + "\r\n").encode('utf-8') + body_bytes
+
+class StreamedResponse(Response):
+
+    """
+    A variant of the Response class that allows the server to stream back a response to the client
+    """
+
+    def __init__(self, stream : Callable[[Request], AsyncGenerator[bytes, None]], status_code = HTTPStatus.OK, headers = None):
+        super().__init__(status_code, "", headers)
+        
+        self.stream = stream
+
+        self.headers["Transfer-Encoding"] = "chunked"
+
+    def get_head(self) -> bytes:
+        response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
+        headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
+        cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
+
+        return (response_line + headers + cookies + "\r\n").encode('utf-8')
+
+    pass
+
 class HTTP1Protocol(Protocol):
+
+    """
+    The protocol created to handle HTTP 1/1.1 communications between server and client
+    """
 
     request : Request = None
 
@@ -105,18 +137,39 @@ class HTTP1Protocol(Protocol):
         print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
         return True
     
-    def handle(self, client : socket.socket, slugs, endpoints):
-        self.request.slugs = slugs
-        if f"/{self.request.method}" in endpoints:
-            response : Response = asyncio.run(endpoints[f"/{self.request.method}"](self.request))
-            client.sendall(response.to_bytes())
-            
-            current_time = datetime.now().strftime("%H:%M:%S")
-            peer = client.getpeername()
-            ip = peer[0]
+    async def handle(self, client : socket.socket, slugs, endpoints):
 
-            print(f"{current_time} {response.status_code.value} -> {ip}")
+        self.request.slugs = slugs
+
+        if f"/{self.request.method}" in endpoints:
+            response : Response | StreamedResponse = await endpoints[f"/{self.request.method}"](self.request)
+
+            ip, _ = client.getpeername()
+
+            if isinstance(response, StreamedResponse):
+                client.sendall(response.get_head())
+
+                current_time = datetime.now().strftime("%H:%M:%S")
+
+                print(f"{current_time} {response.status_code.value} STREAM -> {ip}")
+
+                async for packet in response.stream(self.request):
+                    chunk_len = f"{len(packet):X}\r\n".encode('utf-8')
+                    client.sendall(chunk_len + packet + b"\r\n")
+
+                    current_time = datetime.now().strftime("%H:%M:%S")
+                    
+
+                client.sendall(b"0\r\n\r\n")
+
+                print(f"{current_time} {response.status_code.value} STREAM FINISHED -> {ip}")
+
+
+            else:
+                client.sendall(response.to_bytes())
+            
+                current_time = datetime.now().strftime("%H:%M:%S")
+
+                print(f"{current_time} {response.status_code.value} -> {ip}")
         else:
             raise FileNotFoundError()
-
-    pass
