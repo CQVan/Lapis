@@ -71,7 +71,7 @@ class Protocol(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict):
+    async def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict):
         '''
         Handles the protocol logic and server to client communication
         
