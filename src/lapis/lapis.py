@@ -15,7 +15,7 @@ from threading import Thread
 from datetime import datetime
 
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
-from .server_types import BadAPIDirectory, BadRequest, Protocol, ServerConfig
+from .server_types import BadAPIDirectory, BadConfigError, BadRequest, Protocol, ServerConfig
 
 class Lapis:
     """
@@ -53,7 +53,7 @@ class Lapis:
         self.__s.listen()
         
         self.__running = True
-        print(f"Server is now listening on http://{ip}:{port}")
+        print(f"{self.cfg.server_name} is now listening on http://{ip}:{port}")
 
         try:
             while True:
@@ -103,10 +103,15 @@ class Lapis:
     def _bake_paths(self) -> dict:
 
         server_path = pathlib.Path(sys.argv[0]).resolve()
-        root : pathlib.Path = server_path.parent / pathlib.Path(self.cfg.dir)
+        root : pathlib.Path = server_path.parent / pathlib.Path(self.cfg.api_directory)
+
+        try:
+            root.parent.resolve(strict=False)
+        except (OSError, RuntimeError):
+            raise BadConfigError("config parameter \"api_directory\" must be a valid file path")
 
         if not root.exists():
-            raise BadAPIDirectory("Missing api directory")
+            raise BadAPIDirectory(f"api directory \"{root}\" does not exist")
 
         result = {}
 
@@ -157,8 +162,8 @@ class Lapis:
             return
 
         try:
-            path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
-            parts : list[str] = path.relative_to(self.cfg.dir).parts
+            path = pathlib.Path(f"{self.cfg.api_directory}{request.base_url}")
+            parts : list[str] = path.relative_to(self.cfg.api_directory).parts
             
             leaf : dict = self.__paths
             for part in parts:

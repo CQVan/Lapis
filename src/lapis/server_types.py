@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import socket
+import json
+from typing import get_origin, get_type_hints
 
 @dataclass
 class ServerConfig:
@@ -8,11 +10,63 @@ class ServerConfig:
     The class containing all configuration settings for a Lapis server to operate with
     """
 
-    dir : str = "./api"
+    api_directory : str = "./api"
     max_request_size : int = 4096
     server_name : str = "Server"
     path_script_name : str = "path"
+
+    protocol_configs : dict[str, dict] = field(default_factory=dict)
+
+    @classmethod
+    def from_json(cls, file_path : str) -> "ServerConfig":
+        """
+        Generates a ServerConfig object from the json file found at the file path
+        
+        :param file_path: The file path of the json server config
+        :type file_path: str
+        :return: The resulting ServerConfig object generated from the json file
+        :rtype: ServerConfig
+        """
+
+        config : ServerConfig = ServerConfig()
+        
+        with open(file_path, 'r') as file:
+            # Read and parse the JSON content from the file
+            data = json.load(file)
+
+            hints = get_type_hints(config.__class__)
+
+            for key, expected_type in hints.items():
+                if key not in data:
+                    continue
+
+                value = data[key]
+
+                if not cls._check_type(value, expected_type):
+                    raise BadConfigError(
+                        f"\"{key}\" must be of type {expected_type.__name__}"
+                    )
+
+                setattr(config, key, value)
+
+        return config
     
+    def _check_type(value, expected_type) -> bool:
+        """
+        Returns if a value is an instance of a type while accounting for generics
+        """
+        origin = get_origin(expected_type)
+
+        if origin is None:
+            return isinstance(value, expected_type)
+
+        if origin is dict:
+            return isinstance(value, dict)
+
+        if origin is list:
+            return isinstance(value, list)
+
+        return isinstance(value, origin)
 
 # region Exceptions
 
@@ -20,13 +74,16 @@ class BadRequest(Exception):
     """
     An Exception raised when a client request is not formatted correctly
     """
-    pass
 
 class BadAPIDirectory(Exception):
     """
     An Exception raised when the format of the directory containing all endpoints is incorrect
     """
-    pass
+
+class BadConfigError(Exception):
+    """
+    An Exception raised when the format or typing of a Config is given
+    """
 
 # endregion
 
