@@ -1,6 +1,4 @@
 """
-Docstring for lapis.lapis
-
 The main script for the Lapis server handling initial request handling and response
 """
 

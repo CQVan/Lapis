@@ -1,3 +1,7 @@
+"""
+Module containing all server related types and exceptions
+"""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import socket
@@ -5,10 +9,6 @@ import json
 import sys
 from typing import get_origin, get_type_hints
 import pathlib
-
-"""
-Module containing all server related types and exceptions
-"""
 
 @dataclass
 class ServerConfig:
@@ -59,7 +59,7 @@ class ServerConfig:
                 setattr(config, key, value)
 
         return config
-    
+
     @classmethod
     def _check_type(cls, value, expected_type) -> bool:
         """
