@@ -12,6 +12,7 @@ import sys
 from threading import Thread
 from datetime import datetime
 
+from lapis.protocols.websocket import WebSocketProtocol
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
 from .server_types import BadAPIDirectory, BadConfigError, BadRequest, Protocol, ServerConfig
 
@@ -34,6 +35,7 @@ class Lapis:
             self.cfg = config
 
         self.__register_protocol(HTTP1Protocol)
+        self.__register_protocol(WebSocketProtocol)
 
         self.__paths = self._bake_paths()
 
@@ -145,7 +147,6 @@ class Lapis:
 
             # Add endpoints
             current_level.update(api_routes)
-
         return result
 
     def _handle_request(self, client: socket.socket):
@@ -160,6 +161,7 @@ class Lapis:
             return
 
         try:
+            # Digs through api cache map to find the correct endpoint directory
             path = pathlib.Path(f"{self.cfg.api_directory}{request.base_url}")
             parts : list[str] = path.relative_to(self.cfg.api_directory).parts
             
@@ -169,6 +171,7 @@ class Lapis:
                     leaf = leaf[part]
                     continue
                 
+                # checks if there are dynamic routes available
                 dynamic_routes: list[str] = list(
                     {
                         key
@@ -181,11 +184,12 @@ class Lapis:
                     request.slugs[dynamic_routes[0].strip("[]")] = part
                     leaf = leaf[dynamic_routes[0]]
                 else:
-                    raise FileNotFoundError()
+                    raise FileNotFoundError("No Path found!")
 
             if len(leaf) == 0:
-                raise FileExistsError()
+                raise FileNotFoundError("No Path found!")
             
+            # Finds the correct protocol based on the inital request
             for ProtocolCls in self.__protocols:
                 protocol: Protocol = ProtocolCls()
 
@@ -193,7 +197,7 @@ class Lapis:
                     continue
 
                 if not protocol.handshake(client=client):
-                    break
+                    raise BadRequest("Failed Handshake with protocol!")
 
                 target_endpoints = protocol.get_target_endpoints()
 
@@ -202,6 +206,8 @@ class Lapis:
                     for k in target_endpoints 
                     if f"/{k}" in leaf 
                 }
+
+                endpoints = { key.lstrip("/"): value for key, value in endpoints.items() }
 
                 if inspect.iscoroutinefunction(protocol.handle):
                     asyncio.run(protocol.handle(
@@ -217,8 +223,8 @@ class Lapis:
                     )
                 
                 break
-            else:
-                raise BadRequest()
+            else: # No Protocol was found to be compatible 
+                raise BadRequest("No Compatible Protocol Found!")
 
         
         except BadRequest as e:
