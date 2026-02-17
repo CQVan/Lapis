@@ -20,8 +20,8 @@ class Request:
     def __init__(self, data: bytes):
         try:
             text = data.decode("iso-8859-1")
-        except UnicodeDecodeError:
-            raise BadRequest("Invalid encoding")
+        except UnicodeDecodeError as err:
+            raise BadRequest("Invalid encoding") from err
 
         if "\r\n\r\n" not in text:
             raise BadRequest("Malformed HTTP request")
@@ -54,7 +54,7 @@ class Request:
             parsed = urlparse(url)
         except ValueError as exc:
             raise BadRequest("Bad URL") from exc
-        
+
         self.base_url = parsed.path
         self.query_params = dict(parse_qsl(parsed.query))
         self.body = body
@@ -65,12 +65,15 @@ class Response:
     The object class for forming a HTTP 1/1.1 response to the client from the server
     """
 
-    def __init__(self, 
-                 status_code : int | HTTPStatus = HTTPStatus.OK, 
+    def __init__(self,
+                 status_code : int | HTTPStatus = HTTPStatus.OK,
                  body : str = "",
-                 headers : dict[str, any] = None, 
+                 headers : dict[str, any] = None,
                  ):
-        self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
+        self.status_code = (status_code
+                            if isinstance(status_code, HTTPStatus)
+                            else HTTPStatus(status_code))
+
         self.protocol = "HTTP/1.1"
         self.headers = headers if headers is not None else {
             "Content-Type": "text/plain",
@@ -80,9 +83,15 @@ class Response:
 
     @property
     def reason_phrase(self):
+        """
+        Returns the reasoning behind the status code
+        """
         return self.status_code.phrase
 
     def to_bytes(self):
+        """
+        Returns the raw byte format of the Response class
+        """
         body_bytes = self.body.encode('utf-8')
         if "Content-Length" not in self.headers:
             self.headers["Content-Length"] = len(body_bytes)
@@ -99,14 +108,23 @@ class StreamedResponse(Response):
     A variant of the Response class that allows the server to stream back a response to the client
     """
 
-    def __init__(self, stream : Callable[[Request], AsyncGenerator[bytes, None]], status_code = HTTPStatus.OK, headers = None):
+    def __init__(
+            self,
+            stream : Callable[[Request], AsyncGenerator[bytes, None]],
+            status_code = HTTPStatus.OK,
+            headers : dict[str, str] = None):
+
         super().__init__(status_code, "", headers)
-        
+
         self.stream = stream
 
         self.headers["Transfer-Encoding"] = "chunked"
 
     def get_head(self) -> bytes:
+        """
+        :return: The inital head of the streamed response from the server
+        :rtype: bytes
+        """
         response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
         headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
         cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
@@ -128,29 +146,26 @@ class HTTP1Protocol(Protocol):
         return [method.name for method in HTTPMethod]
 
     def identify(self, initial_data):
-        try: 
+        try:
             self.request = Request(initial_data)
             return True
         except BadRequest:
             return False
-    
+
     def handshake(self, client : socket.socket):
         # don't know how this would create an exception but its here just to be safe
 
-        try:
-            current_time = datetime.now().strftime("%H:%M:%S")
-            ip, _ = client.getpeername()
-            print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
-            return True
-        except:
-            return False
-    
+        current_time = datetime.now().strftime("%H:%M:%S")
+        ip, _ = client.getpeername()
+        print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
+        return True
+
     async def handle(self, client : socket.socket, slugs, endpoints):
 
         self.request.slugs = slugs
 
         if self.request.method in endpoints:
-            response : Response | StreamedResponse = await endpoints[self.request.method](self.request)
+            response : Response = await endpoints[self.request.method](self.request)
 
             ip, _ = client.getpeername()
 
@@ -166,7 +181,6 @@ class HTTP1Protocol(Protocol):
                     client.sendall(chunk_len + packet + b"\r\n")
 
                     current_time = datetime.now().strftime("%H:%M:%S")
-                    
 
                 client.sendall(b"0\r\n\r\n")
 
@@ -175,7 +189,7 @@ class HTTP1Protocol(Protocol):
 
             else:
                 client.sendall(response.to_bytes())
-            
+
                 current_time = datetime.now().strftime("%H:%M:%S")
 
                 print(f"{current_time} {response.status_code.value} -> {ip}")

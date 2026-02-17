@@ -95,6 +95,11 @@ class BadConfigError(Exception):
     An Exception raised when the format or typing of a Config is given
     """
 
+class ProtocolEndpointError(Exception):
+    """
+    The exception raised when there is an error with protocol target endpoint functions
+    """
+
 # endregion
 
 class Protocol(ABC):
@@ -147,7 +152,12 @@ class Protocol(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict[str, any]):
+    async def handle(
+        self,
+        client : socket.socket,
+        slugs: dict[str, str],
+        endpoints: dict[str, any]
+    ):
         '''
         Handles the protocol logic and server to client communication
         

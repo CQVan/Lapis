@@ -14,7 +14,14 @@ from datetime import datetime
 
 from lapis.protocols.websocket import WebSocketProtocol
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
-from .server_types import BadAPIDirectory, BadConfigError, BadRequest, Protocol, ServerConfig
+from .server_types import (
+    BadAPIDirectory,
+    BadConfigError,
+    BadRequest,
+    Protocol,
+    ServerConfig,
+    ProtocolEndpointError
+)
 
 class Lapis:
     """
@@ -51,7 +58,7 @@ class Lapis:
         self.__s = socket.socket()
         self.__s.bind((ip, port))
         self.__s.listen()
-        
+
         self.__running = True
         print(f"{self.cfg.server_name} is now listening on http://{ip}:{port}")
 
@@ -74,7 +81,7 @@ class Lapis:
 
         endpoints : list[str] = protocol().get_target_endpoints()
         if bool(set(endpoints) & set(self.__taken_endpoints)):
-            raise Exception("Cannot reuse target endpoint method!")
+            raise ProtocolEndpointError("Cannot reuse target endpoint method!")
 
         self.__protocols.insert(0, protocol)
         self.__taken_endpoints.extend(endpoints)
@@ -92,8 +99,6 @@ class Lapis:
 
         self.__paths = self._bake_paths()
 
-        pass
-
     def _get_dynamic_dirs(self, directory: pathlib.Path):
         return [
             p for p in directory.iterdir()
@@ -107,8 +112,8 @@ class Lapis:
 
         try:
             root.parent.resolve(strict=False)
-        except (OSError, RuntimeError):
-            raise BadConfigError("config parameter \"api_directory\" must be a valid file path")
+        except (OSError, RuntimeError) as err:
+            raise BadConfigError("\"api_directory\" in config must be a valid file path") from err
 
         if not root.exists():
             raise BadAPIDirectory(f"api directory \"{root}\" does not exist")
@@ -122,7 +127,7 @@ class Lapis:
             parts = path.relative_to(root).parts
             current_level = result
             current_fs_level = root
-            
+
             for part in parts[:-1]:
                 dynamic_dirs = self._get_dynamic_dirs(current_fs_level)
                 if len(dynamic_dirs) > 1:
@@ -140,8 +145,8 @@ class Lapis:
 
             # Grab just endpoint methods
             api_routes = {
-                f"/{k}": v 
-                for k, v in script_globals.items() 
+                f"/{k}": v
+                for k, v in script_globals.items()
                 if k in self.__taken_endpoints
             }
 
@@ -149,49 +154,58 @@ class Lapis:
             current_level.update(api_routes)
         return result
 
+    def __has_endpoint_path(self, base_url : str) -> tuple[dict[str, any] | None, dict[str,str]]:
+        # Digs through api cache map to find the correct endpoint directory
+        slugs = {}
+        path = pathlib.Path(f"{self.cfg.api_directory}{base_url}")
+        parts : list[str] = path.relative_to(self.cfg.api_directory).parts
+
+        leaf : dict = self.__paths
+        for part in parts:
+            if part in leaf:
+                leaf = leaf[part]
+                continue
+
+            # checks if there are dynamic routes available
+            dynamic_routes: list[str] = list(
+                {
+                    key
+                    for key in leaf
+                    if key.startswith("[") and key.endswith("]")
+                }
+            )
+
+            if len(dynamic_routes) == 1:
+                slugs[dynamic_routes[0].strip("[]")] = part
+                leaf = leaf[dynamic_routes[0]]
+            else:
+                return (None, {})
+
+        if len(leaf) == 0:
+            return (None, {})
+
+        return (leaf, slugs)
+
     def _handle_request(self, client: socket.socket):
+        data = client.recv(self.cfg.max_request_size)
+
         try:
-            data = client.recv(self.cfg.max_request_size)
             request : Request = Request(data)
 
-        except Exception as e:
-            print(f"Error handling client: {e}")
+        except BadRequest:
             self.__send_response(client, Response(status_code=400, body="400 Bad Request"))
             client.close()
             return
 
         try:
-            # Digs through api cache map to find the correct endpoint directory
-            path = pathlib.Path(f"{self.cfg.api_directory}{request.base_url}")
-            parts : list[str] = path.relative_to(self.cfg.api_directory).parts
-            
-            leaf : dict = self.__paths
-            for part in parts:
-                if part in leaf:
-                    leaf = leaf[part]
-                    continue
-                
-                # checks if there are dynamic routes available
-                dynamic_routes: list[str] = list(
-                    {
-                        key
-                        for key in leaf
-                        if key.startswith("[") and key.endswith("]")
-                    }
-                )
+            (endpoint, request.slugs) = self.__has_endpoint_path(request.base_url)
 
-                if len(dynamic_routes) == 1:
-                    request.slugs[dynamic_routes[0].strip("[]")] = part
-                    leaf = leaf[dynamic_routes[0]]
-                else:
-                    raise FileNotFoundError("No Path found!")
+            if endpoint is None:
+                raise FileNotFoundError()
 
-            if len(leaf) == 0:
-                raise FileNotFoundError("No Path found!")
-            
             # Finds the correct protocol based on the inital request
-            for ProtocolCls in self.__protocols:
-                protocol: Protocol = ProtocolCls()
+            for protocol_cls in self.__protocols:
+                protocol: Protocol = protocol_cls()
 
                 if not protocol.identify(initial_data=data):
                     continue
@@ -201,10 +215,10 @@ class Lapis:
 
                 target_endpoints = protocol.get_target_endpoints()
 
-                endpoints = { 
-                    f"/{k}": leaf[f"/{k}"] 
-                    for k in target_endpoints 
-                    if f"/{k}" in leaf 
+                endpoints = {
+                    f"/{k}": endpoint[f"/{k}"]
+                    for k in target_endpoints
+                    if f"/{k}" in endpoint
                 }
 
                 endpoints = { key.lstrip("/"): value for key, value in endpoints.items() }
@@ -221,22 +235,21 @@ class Lapis:
                         slugs=request.slugs,
                         endpoints=endpoints,
                     )
-                
+
                 break
-            else: # No Protocol was found to be compatible 
+            else: # No Protocol was found to be compatible
                 raise BadRequest("No Compatible Protocol Found!")
 
-        
-        except BadRequest as e:
+
+        except BadRequest:
             response : Response = Response(status_code=400, body="400 Bad Request")
             self.__send_response(client=client, response=response)
 
         except FileNotFoundError:
             response : Response = Response(status_code=404, body="404 Not Found")
             self.__send_response(client, response)
-            pass
 
-        except Exception as e:
+        except RuntimeError as e:
             print(f"Error handling request: {e}")
             response = Response(status_code=500, body="Internal Server Error")
             self.__send_response(client, response)
@@ -256,5 +269,5 @@ class Lapis:
                 print("Closing Server...")
                 self.__running = False
                 self.__s.close()
-            except Exception as e:
+            except socket.error as e:
                 print(f"Error when closing socket: {e}")

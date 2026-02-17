@@ -1,12 +1,17 @@
+"""
+The Module containing Lapis' native WebSocket Protocol Handler
+"""
+
 import asyncio
+import binascii
 from datetime import datetime
 import socket
-from lapis.server_types import Protocol
-from lapis.protocols.http1 import Request, Response
-
 import base64
 import hashlib
 from enum import Enum
+
+from lapis.server_types import Protocol
+from lapis.protocols.http1 import Request, Response
 
 class WSRecvTimeoutError(Exception):
     """
@@ -24,6 +29,9 @@ class WSPortalClosedError(Exception):
     """
 
 class WSOpcode(Enum):
+    """
+    The class containing all opcodes for a WSFrame to contain
+    """
     CONTINUATION = 0x0
     TEXT         = 0x1
     BINARY       = 0x2
@@ -32,6 +40,9 @@ class WSOpcode(Enum):
     PONG         = 0xA
 
 class WSFrame():
+    """
+    The class used to handle frame data between server and client
+    """
     __data: bytes
 
     def __init__(self, data: bytes):
@@ -61,7 +72,7 @@ class WSFrame():
         if length == 126:
             return int.from_bytes(self.__data[2:4], "big")
         return int.from_bytes(self.__data[2:10], "big")
-    
+
     def _header_length(self) -> int:
         length = self.__data[1] & 0x7F
 
@@ -88,7 +99,6 @@ class WSFrame():
 
         # Unmask if needed
         if self.masked:
-            key = self.masking_key
             payload = bytes(b ^ self.masking_key[i % 4] for i, b in enumerate(payload))
 
         # Decode based on opcode
@@ -115,21 +125,37 @@ class WSFrame():
         )
 
 class WSPortal():
-
+    """
+    The interface the Websocket endpoint function uses to communicate between server and client
+    """
     slugs : dict[str, str] = {}
 
     def __init__(self, slugs, client : socket.socket):
-        
+
         self.__client : socket.socket = client
         self.__client.setblocking(False)
+
+        self.inital_req : Request = None
+
         self.__recv_queue : asyncio.Queue[WSFrame] = asyncio.Queue[WSFrame]()
+        self.__pong_waiters = None
 
         self.__closed : bool = False
         self.slugs : dict[str, str] = slugs
-        
+
         asyncio.create_task(self.__reader())
 
     def __send_frame(self, opcode: WSOpcode, payload: str | bytes = b"", fin: bool = True):
+        """
+        Utility function used to send frames from server to client
+                    
+        :param opcode: The type of frame sent
+        :type opcode: WSOpcode
+        :param payload: The data sent with the frame
+        :type payload: str | bytes
+        :param fin: If the frame is fragmented
+        :type fin: bool
+        """
         if self.__closed:
             raise WSPortalClosedError()
 
@@ -162,10 +188,8 @@ class WSPortal():
                     raise ConnectionResetError("Connection Was Reset!")
                 data += chunk
             return data
-        except asyncio.CancelledError:
-            raise
-        except Exception: # Generic catch for socket errors
-            raise ConnectionError("Connection Error or Timeout")
+        except Exception as err:
+            raise ConnectionError("Connection Error or Timeout") from err
 
     async def __reader(self):
         try:
@@ -203,27 +227,30 @@ class WSPortal():
                 if frame.opcode == WSOpcode.PING:
                     if not frame.fin: # Cannot send fragmented control frames
                         self.close(1002)
-                    else: 
+                    else:
                         self.__send_frame(
                             opcode=WSOpcode.PONG,
-                            payload=frame.data if isinstance(frame.data, bytes) else frame.data.encode()
+                            payload=frame.data
+                                if isinstance(frame.data, bytes)
+                                else frame.data.encode()
                         )
-                    pass
                 elif frame.opcode == WSOpcode.CLOSE:
                     self.close()
-                    pass
                 elif frame.opcode == WSOpcode.PONG:
                     if not self.__pong_waiters.done():
                         self.__pong_waiters.set_result(True)
                 else:
                     await self.__recv_queue.put(frame)
-                    pass
-                pass
-        except:
+        except Exception:
             self.close(1011)
+            raise
 
     @property
-    def closed(self): return self.__closed
+    def closed(self):
+        """
+        Returns if the connection between the client and server is open
+        """
+        return self.__closed
 
     async def recv(self, timeout: float = None) -> str | bytes:
         """
@@ -242,7 +269,7 @@ class WSPortal():
 
         try:
             frame: WSFrame = await asyncio.wait_for(self.__recv_queue.get(), timeout=timeout)
-            
+
             if frame.fin: # Unfragmented frame
                 current_time = datetime.now().strftime("%H:%M:%S")
                 ip, _ = self.__client.getpeername()
@@ -252,7 +279,7 @@ class WSPortal():
 
             result = frame.data
             is_text = isinstance(result, str)
-            
+
             while True:
                 frame = await asyncio.wait_for(self.__recv_queue.get(), timeout=timeout)
 
@@ -272,8 +299,8 @@ class WSPortal():
 
             return result
 
-        except asyncio.TimeoutError:
-            raise WSRecvTimeoutError()
+        except asyncio.TimeoutError as err:
+            raise WSRecvTimeoutError() from err
 
     def send(self, payload : str | bytes):
         """
@@ -314,19 +341,19 @@ class WSPortal():
             return result
         except asyncio.TimeoutError:
             return False
-        
+
         finally:
             self.__pong_waiters = None
 
     def close(self, code : int = 1000):
         if self.closed:
             return
-        
+
         self.__send_frame(
             opcode=WSOpcode.CLOSE,
             payload=code.to_bytes(2,"big")
         )
-        
+
         self.__closed = True
         self.__client.close()
 
@@ -339,7 +366,14 @@ class WSPortal():
 
 class WebSocketProtocol(Protocol):
 
+    """
+    The protocol created to handle websocket connections between server and client
+    """
+
     __WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+    def __init__(self):
+        self.inital_req : Request = None
 
     def __compute_accept_key(self, sec_key: str) -> str:
         sha1 = hashlib.sha1((sec_key + self.__WS_GUID).encode("ascii")).digest()
@@ -349,26 +383,30 @@ class WebSocketProtocol(Protocol):
         return "websocket13_config"
 
     def get_target_endpoints(self) -> list[str]:
+        """
+        :return: All Endpoint functions the WebSocket Protocol looks for
+        :rtype: list[str]
+        """
         return ["WEBSOCKET"]
-    
+
     def identify(self, initial_data) -> bool:
         self.inital_req : Request = Request(initial_data)
 
         if self.inital_req.headers.get("Connection") != "Upgrade":
             return False
-        
+
         if self.inital_req.headers.get("Upgrade", "").lower() != "websocket":
             return False
-        
+
         return True
-    
+
     def handshake(self, client) -> bool:
         req = self.inital_req
 
         if req.method != "GET":
             client.send(Response(400).to_bytes())
             return False
-        
+
         if "Host" not in req.headers:
             client.send(Response(400).to_bytes())
             return False
@@ -383,7 +421,7 @@ class WebSocketProtocol(Protocol):
                     "Sec-WebSocket-Version": "13"
                 }
             )
-            
+
             client.send(resp.to_bytes())
             return False
 
@@ -398,7 +436,7 @@ class WebSocketProtocol(Protocol):
             raw = base64.b64decode(key, validate=True)
             if len(raw) != 16:
                 raise ValueError("Invalid key")
-        except Exception:
+        except (binascii.Error, ValueError):
             client.send(Response(400).to_bytes())
             return False
 
@@ -415,15 +453,20 @@ class WebSocketProtocol(Protocol):
         )
 
         client.send(resp.to_bytes())
-        
+
         current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = client.getpeername()
         print(f"{current_time} {self.inital_req.method} {self.inital_req.base_url} <-WS-> {ip}")
 
         return True
 
-    async def handle(self, client : socket.socket, slugs : dict[str, str], endpoints : dict[str, any]):
-        
+    async def handle(
+        self,
+        client : socket.socket,
+        slugs : dict[str, str],
+        endpoints : dict[str, any]
+    ):
+
         """
         Handles connection from client until socket is closed
         
@@ -437,6 +480,5 @@ class WebSocketProtocol(Protocol):
                 portal : WSPortal = WSPortal(slugs=slugs, client=client)
                 await endpoints[endpoint](portal)
                 return
-        else:
-            raise FileNotFoundError("No Websocket Endpoint Found!")
 
+        raise FileNotFoundError("No Websocket Endpoint Found!")
