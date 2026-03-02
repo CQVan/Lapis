@@ -296,6 +296,7 @@ class WSPortal:
                 # Get First part of Header
                 header: bytes = await self.__read_exact(2)
                 length_bytes: bytes = header[1] & 0x7F
+                opcode: WSOpcode = WSOpcode(header[0] & 0x0F)
 
                 payload_len: int = 0
 
@@ -310,8 +311,20 @@ class WSPortal:
                     payload_len = length_bytes
                     length_bytes = b""
 
-                # recieve mask if required
+                if (
+                    opcode == WSOpcode.PING
+                    or opcode == WSOpcode.PONG
+                    or opcode == WSOpcode.CLOSE
+                ) and payload_len > 125:
+                    self.close(1002)
+                    return
+
                 has_mask: bool = bool(header[1] & 0x80)
+
+                if not has_mask:
+                    self.close(1002)
+                    return
+
                 mask: bytes = await self.__read_exact(4) if has_mask else b""
 
                 if (
@@ -504,14 +517,12 @@ class WSPortal:
         self.__send_frame(opcode=WSOpcode.CLOSE, payload=code.to_bytes(2, "big"))
 
         self.__closed = True
-        self.__client.close()
-
-        WebSocketProtocol.__current_connections -= 1
 
         current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = self.__client.getpeername()
+        self.__client.close()
 
-        arrow = "-X->" if code == 1000 else "-!X!->"
+        arrow = "--X->" if code == 1000 else "-!X!->"
 
         print(f"{current_time} Server {arrow} {ip}")
 
@@ -520,8 +531,6 @@ class WebSocketProtocol(Protocol):
     """
     The protocol created to handle websocket connections between server and client
     """
-
-    __current_connections: int = 0
 
     def __init__(self, config: dict[str, any]):
         self.__WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -552,13 +561,6 @@ class WebSocketProtocol(Protocol):
 
     def handshake(self, client) -> bool:
         req = self.inital_req
-
-        if (
-            self.__config.max_connections != None
-            and WebSocketProtocol.__current_connections >= self.__config.max_connections
-        ):
-            client.send(Response(503).to_bytes())
-            return False
 
         if req.method != "GET":
             client.send(Response(400).to_bytes())
@@ -631,7 +633,6 @@ class WebSocketProtocol(Protocol):
                 portal: WSPortal = WSPortal(
                     slugs=slugs, config=self.__config, client=client
                 )
-                WebSocketProtocol.__current_connections += 1
                 await endpoints[endpoint](portal)
                 return
 

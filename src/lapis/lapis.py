@@ -51,7 +51,6 @@ class Lapis:
         self.__register_protocol(WebSocketProtocol)
 
         self._bake_paths()
-        print(self.__paths)
 
     def run(self, ip: str, port: int):
         """
@@ -63,6 +62,7 @@ class Lapis:
         :type port: int
         """
         self.__s = socket.socket()
+        self.__s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__s.bind((ip, port))
         self.__s.listen()
 
@@ -86,7 +86,11 @@ class Lapis:
         if self.__running:
             raise RuntimeError("Cannot register new Protocol while server is running")
 
-        endpoints: list[str] = protocol().get_target_endpoints()
+        protocol_config = self.cfg.protocol_configs.get(
+            protocol.get_config_key(), {}
+        )
+
+        endpoints: list[str] = protocol(config=protocol_config).get_target_endpoints()
         if bool(set(endpoints) & set(self.__taken_endpoints)):
             raise ProtocolEndpointError("Cannot reuse target endpoint method!")
 
@@ -247,7 +251,7 @@ class Lapis:
 
             # Finds the correct protocol based on the inital request
             for protocol_cls in self.__protocols:
-                protocol_config = ServerConfig.protocol_configs.get(
+                protocol_config = self.cfg.protocol_configs.get(
                     protocol_cls.get_config_key(), {}
                 )
 
