@@ -15,6 +15,7 @@ from datetime import datetime
 
 from lapis.protocols.websocket import WebSocketProtocol
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
+from lapis.util import print_connection_event, string_to_clickable_url
 from .server_types import (
     BadAPIDirectory,
     BadConfigError,
@@ -67,7 +68,7 @@ class Lapis:
         self.__s.listen()
 
         self.__running = True
-        print(f"{self.cfg.server_name} is now listening on http://{ip}:{port}")
+        print(f"{self.cfg.server_name} is now listening on {string_to_clickable_url(f'http://{ip}:{port}')}")
 
         try:
             while True:
@@ -86,9 +87,7 @@ class Lapis:
         if self.__running:
             raise RuntimeError("Cannot register new Protocol while server is running")
 
-        protocol_config = self.cfg.protocol_configs.get(
-            protocol.get_config_key(), {}
-        )
+        protocol_config = self.cfg.protocol_configs.get(protocol.get_config_key(), {})
 
         endpoints: list[str] = protocol(config=protocol_config).get_target_endpoints()
         if bool(set(endpoints) & set(self.__taken_endpoints)):
@@ -310,9 +309,8 @@ class Lapis:
 
     def __send_response(self, client: socket.socket, response: Response):
         client.sendall(response.to_bytes())
-        current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = client.getpeername()
-        print(f"{current_time} {response.status_code.value} -> {ip}")
+        print_connection_event(response.status_code.value, "->", ip)
 
     def __close(self):
         if self.__s is not None:

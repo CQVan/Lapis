@@ -6,6 +6,11 @@ async def WEBSOCKET(portal: WSPortal):
 
     while not portal.closed:
         payload = await portal.recv()
+
+        if payload == "close":
+            portal.close()
+            break
+
         portal.send(payload=payload)
 
         await portal.ping(1000)

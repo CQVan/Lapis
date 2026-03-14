@@ -11,7 +11,9 @@ import base64
 import hashlib
 from enum import Enum
 import sys
+from typing import Literal
 
+from lapis.util import print_connection_event, read_exact
 from lapis.server_types import Protocol
 from lapis.protocols.http1 import Request, Response
 
@@ -236,10 +238,13 @@ class WSPortal:
         self.__closed: bool = False
         self.slugs: dict[str, str] = slugs
 
-        asyncio.create_task(self.__reader())
+        self.__reader_task = asyncio.create_task(self.__reader())
 
-        if self.__config.auto_ping_interval != None:
+        self.__auto_ping_task = (
             asyncio.create_task(self.__auto_ping())
+            if self.__config.auto_ping_interval != None
+            else None
+        )
 
     def __send_frame(
         self, opcode: WSOpcode, payload: str | bytes = b"", fin: bool = True
@@ -276,25 +281,12 @@ class WSPortal:
 
         self.__client.sendall(bytes(header) + data)
 
-    async def __read_exact(self, bufsize: int):
-        loop = asyncio.get_running_loop()
-        data = b""
-        try:
-            while len(data) < bufsize:
-                chunk = await loop.sock_recv(self.__client, bufsize - len(data))
-                if not chunk:
-                    raise ConnectionResetError("Connection Was Reset!")
-                data += chunk
-            return data
-        except Exception as err:
-            raise ConnectionError("Connection Error or Timeout") from err
-
     async def __reader(self):
         try:
             while not self.__closed:
 
                 # Get First part of Header
-                header: bytes = await self.__read_exact(2)
+                header: bytes = await read_exact(self.__client, 2)
                 length_bytes: bytes = header[1] & 0x7F
                 opcode: WSOpcode = WSOpcode(header[0] & 0x0F)
 
@@ -302,10 +294,10 @@ class WSPortal:
 
                 # Get payload length
                 if length_bytes == 126:
-                    length_bytes = await self.__read_exact(2)
+                    length_bytes = await read_exact(self.__client, 2)
                     payload_len = int.from_bytes(length_bytes, "big")
                 elif length_bytes == 127:
-                    length_bytes = await self.__read_exact(8)
+                    length_bytes = await read_exact(self.__client, 8)
                     payload_len = int.from_bytes(length_bytes, "big")
                 else:
                     payload_len = length_bytes
@@ -325,7 +317,7 @@ class WSPortal:
                     self.close(1002)
                     return
 
-                mask: bytes = await self.__read_exact(4) if has_mask else b""
+                mask: bytes = await read_exact(self.__client, 4) if has_mask else b""
 
                 if (
                     self.__config.max_frame_size != None
@@ -336,7 +328,7 @@ class WSPortal:
                     return
 
                 # recieve body
-                body: bytes = await self.__read_exact(payload_len)
+                body: bytes = await read_exact(self.__client, payload_len)
 
                 # Build WSFrame correctly
                 frame: WSFrame = WSFrame(header + length_bytes + mask + body)
@@ -356,7 +348,7 @@ class WSPortal:
                             ),
                         )
                 elif frame.opcode == WSOpcode.CLOSE:
-                    self.close()
+                    self.__close(source="client")
                     return
                 elif frame.opcode == WSOpcode.PONG:
                     for waiter in self.__pong_waiters:
@@ -430,10 +422,9 @@ class WSPortal:
             )
 
             if frame.fin:  # Unfragmented frame
-                current_time = datetime.now().strftime("%H:%M:%S")
                 ip, _ = self.__client.getpeername()
 
-                print(f"{current_time} Server <-WS- {ip}")
+                print_connection_event("Server", "<-WS-", ip)
                 return frame.data
 
             result = frame.data
@@ -451,10 +442,9 @@ class WSPortal:
                 if frame.fin:
                     break
 
-            current_time = datetime.now().strftime("%H:%M:%S")
             ip, _ = self.__client.getpeername()
 
-            print(f"{current_time} Server <-WS- {ip}")
+            print_connection_event("Server", "<-WS-", ip)
 
             return result
 
@@ -476,10 +466,9 @@ class WSPortal:
 
         self.__send_frame(opcode=opcode, payload=payload)
 
-        current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = self.__client.getpeername()
 
-        print(f"{current_time} Server -WS-> {ip}")
+        print_connection_event("Server", " -WS->", ip)
 
     async def ping(self, timeout: float) -> bool:
         """
@@ -503,12 +492,14 @@ class WSPortal:
         finally:
             self.__pong_waiters.discard(waiter)
 
-    def close(self, code: int = 1000):
+    def __close(self, code: int = 1000, source: Literal["server", "client"] = "server"):
         """
         Closes the connection between the server and client using the given close code
 
         :param code: The close code the server will send to the client (default 1000)
         :type code: int
+        :param source: Whether the close was initiated by the server or client (default "server")
+        :type source: str
         """
 
         if self.closed:
@@ -518,13 +509,29 @@ class WSPortal:
 
         self.__closed = True
 
-        current_time = datetime.now().strftime("%H:%M:%S")
+        self.__reader_task.cancel()
+        if self.__auto_ping_task is not None:
+            self.__auto_ping_task.cancel()
+
         ip, _ = self.__client.getpeername()
         self.__client.close()
 
-        arrow = "--X->" if code == 1000 else "-!X!->"
+        if source == "server":
+            arrow = " --X->" if code == 1000 else "-!X!->"
+            print_connection_event("Server", arrow, ip)
+        else:
+            arrow = "<--X--" if code == 1000 else "<-!X!-"
+            print_connection_event("Server", arrow, ip)
 
-        print(f"{current_time} Server {arrow} {ip}")
+    def close(self, code: int = 1000):
+        """
+        Closes the connection between the server and client using the given close code
+
+        :param code: The close code the server will send to the client (default 1000)
+        :type code: int
+        """
+
+        self.__close(code=code, source="server")
 
 
 class WebSocketProtocol(Protocol):
@@ -609,11 +616,9 @@ class WebSocketProtocol(Protocol):
 
         client.send(resp.to_bytes())
 
-        current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = client.getpeername()
-        print(
-            f"{current_time} {self.inital_req.method} {self.inital_req.base_url} <-WS-> {ip}"
-        )
+
+        print_connection_event(self.inital_req.method + " " + (self.inital_req.base_url), "<-WS->", ip)
 
         return True
 

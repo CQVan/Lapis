@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Callable
 from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
+from lapis.util import print_connection_event
 
 
 @dataclass
@@ -230,9 +231,9 @@ class HTTP1Protocol(Protocol):
     def handshake(self, client: socket.socket):
         # don't know how this would create an exception but its here just to be safe
 
-        current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = client.getpeername()
-        print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
+        print_connection_event(self.request.method + " " + self.request.base_url, "->", ip)
+
         return True
 
     async def handle(self, client: socket.socket, slugs, endpoints):
@@ -247,27 +248,19 @@ class HTTP1Protocol(Protocol):
             if isinstance(response, StreamedResponse):
                 client.sendall(response.get_head())
 
-                current_time = datetime.now().strftime("%H:%M:%S")
-
-                print(f"{current_time} {response.status_code.value} STREAM -> {ip}")
+                print_connection_event(response.status_code.value, "STREAM ->", ip)
 
                 async for packet in response.stream(self.request):
                     chunk_len = f"{len(packet):X}\r\n".encode("utf-8")
                     client.sendall(chunk_len + packet + b"\r\n")
 
-                    current_time = datetime.now().strftime("%H:%M:%S")
-
                 client.sendall(b"0\r\n\r\n")
 
-                print(
-                    f"{current_time} {response.status_code.value} STREAM FINISHED -> {ip}"
-                )
+                print_connection_event(response.status_code.value, "STREAM FINISHED ->", ip)
 
             else:
                 client.sendall(response.to_bytes())
 
-                current_time = datetime.now().strftime("%H:%M:%S")
-
-                print(f"{current_time} {response.status_code.value} -> {ip}")
+                print_connection_event(response.status_code.value, "->", ip)
         else:
             raise FileNotFoundError()
