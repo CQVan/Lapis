@@ -11,10 +11,9 @@ import runpy
 import sys
 import re
 from threading import Thread
-from datetime import datetime
 
 from lapis.protocols.websocket import WebSocketProtocol
-from lapis.protocols.http1 import HTTP1Protocol, Request, Response
+from lapis.protocols.http1 import HTTP1Protocol, Request, Response, BadHTTPRequest
 from lapis.util import print_connection_event, string_to_clickable_url
 from .server_types import (
     BadAPIDirectory,
@@ -68,7 +67,9 @@ class Lapis:
         self.__s.listen()
 
         self.__running = True
-        print(f"{self.cfg.server_name} is now listening on {string_to_clickable_url(f'http://{ip}:{port}')}")
+
+        server_url = string_to_clickable_url(f"http://{ip}:{port}")
+        print(f"{self.cfg.server_name} is now listening on {server_url}")
 
         try:
             while True:
@@ -230,10 +231,19 @@ class Lapis:
         return None, {}
 
     def _handle_request(self, client: socket.socket):
-        data = client.recv(self.cfg.max_request_size)
-
         try:
-            request: Request = Request(data)
+            request: Request = Request.from_socket(client)
+
+        except BadHTTPRequest as e:
+            self.__send_response(
+                client,
+                Response(
+                    status_code=e.status_code.value,
+                    body=f"{e.status_code.value} {e.status_code.phrase}",
+                ),
+            )
+            client.close()
+            return
 
         except BadRequest:
             self.__send_response(
@@ -256,7 +266,7 @@ class Lapis:
 
                 protocol: Protocol = protocol_cls(config=protocol_config)
 
-                if not protocol.identify(initial_data=data):
+                if not protocol.identify(request=request):
                     continue
 
                 if not protocol.handshake(client=client):

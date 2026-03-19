@@ -13,7 +13,7 @@ from enum import Enum
 import sys
 from typing import Literal
 
-from lapis.util import print_connection_event, read_exact
+from lapis.util import print_connection_event, read_exact_async
 from lapis.server_types import Protocol
 from lapis.protocols.http1 import Request, Response
 
@@ -286,7 +286,7 @@ class WSPortal:
             while not self.__closed:
 
                 # Get First part of Header
-                header: bytes = await read_exact(self.__client, 2)
+                header: bytes = await read_exact_async(self.__client, 2)
                 length_bytes: bytes = header[1] & 0x7F
                 opcode: WSOpcode = WSOpcode(header[0] & 0x0F)
 
@@ -294,10 +294,10 @@ class WSPortal:
 
                 # Get payload length
                 if length_bytes == 126:
-                    length_bytes = await read_exact(self.__client, 2)
+                    length_bytes = await read_exact_async(self.__client, 2)
                     payload_len = int.from_bytes(length_bytes, "big")
                 elif length_bytes == 127:
-                    length_bytes = await read_exact(self.__client, 8)
+                    length_bytes = await read_exact_async(self.__client, 8)
                     payload_len = int.from_bytes(length_bytes, "big")
                 else:
                     payload_len = length_bytes
@@ -317,7 +317,7 @@ class WSPortal:
                     self.close(1002)
                     return
 
-                mask: bytes = await read_exact(self.__client, 4) if has_mask else b""
+                mask: bytes = await read_exact_async(self.__client, 4) if has_mask else b""
 
                 if (
                     self.__config.max_frame_size != None
@@ -328,7 +328,7 @@ class WSPortal:
                     return
 
                 # recieve body
-                body: bytes = await read_exact(self.__client, payload_len)
+                body: bytes = await read_exact_async(self.__client, payload_len)
 
                 # Build WSFrame correctly
                 frame: WSFrame = WSFrame(header + length_bytes + mask + body)
@@ -555,8 +555,8 @@ class WebSocketProtocol(Protocol):
         """
         return ["WEBSOCKET"]
 
-    def identify(self, initial_data) -> bool:
-        self.inital_req: Request = Request(initial_data)
+    def identify(self, request: Request) -> bool:
+        self.inital_req: Request = request
 
         if self.inital_req.headers.get("Connection") != "Upgrade":
             return False
@@ -618,7 +618,9 @@ class WebSocketProtocol(Protocol):
 
         ip, _ = client.getpeername()
 
-        print_connection_event(self.inital_req.method + " " + (self.inital_req.base_url), "<-WS->", ip)
+        print_connection_event(
+            self.inital_req.method + " " + (self.inital_req.base_url), "<-WS->", ip
+        )
 
         return True
 

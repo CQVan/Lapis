@@ -4,11 +4,13 @@ Module containing all server related types and exceptions
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import get_origin, get_type_hints
 import socket
 import json
 import sys
-from typing import get_origin, get_type_hints
 import pathlib
+
+from .protocols.http1_types import Request
 
 
 @dataclass
@@ -140,12 +142,12 @@ class Protocol(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def identify(self, initial_data: bytes) -> bool:
+    def identify(self, request: Request) -> bool:
         """
         Function called so see if initial request is attempting to upgrade to the given protocol
 
-        :param initial_data: The initial request from the client
-        :type initial_data: bytes
+        :param request: The initial request from the client
+        :type request: http1_protocol.Request
         :return: If the initial request is for the given protocol
         :rtype: bool
         """
