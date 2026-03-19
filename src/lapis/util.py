@@ -1,3 +1,7 @@
+"""
+Utility functions for Lapis
+"""
+
 import asyncio
 import socket
 from datetime import datetime
@@ -7,6 +11,12 @@ __column_width: int = 20
 
 
 def print_connection_event(*args):
+    """
+    Prints a connection event to the console in a formatted way
+
+    :param args: The arguments to print in the connection event
+    """
+
     current_time = datetime.now().strftime("%H:%M:%S")
 
     if not args:

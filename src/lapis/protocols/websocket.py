@@ -317,7 +317,9 @@ class WSPortal:
                     self.close(1002)
                     return
 
-                mask: bytes = await read_exact_async(self.__client, 4) if has_mask else b""
+                mask: bytes = (
+                    await read_exact_async(self.__client, 4) if has_mask else b""
+                )
 
                 if (
                     self.__config.max_frame_size != None
