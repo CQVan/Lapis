@@ -9,6 +9,7 @@ import socket
 import base64
 import hashlib
 from enum import Enum
+from typing import Optional, Union
 
 from lapis.server_types import Protocol
 from lapis.protocols.http1 import Request, Response
@@ -122,7 +123,7 @@ class WSFrame:
         return 10
 
     @property
-    def masking_key(self) -> bytes | None:
+    def masking_key(self) -> Optional[bytes]:
         """
         Returns the masking key of the frame used to mask the payload
 
@@ -138,7 +139,7 @@ class WSFrame:
         return self.__data[start : start + 4]
 
     @property
-    def data(self) -> str | bytes:
+    def data(self) -> Union[str, bytes]:
         """
         Returns the payload data of the frame
 
@@ -212,7 +213,7 @@ class WSPortal:
         asyncio.create_task(self.__reader())
 
     def __send_frame(
-        self, opcode: WSOpcode, payload: str | bytes = b"", fin: bool = True
+        self, opcode: WSOpcode, payload: Union[str, bytes] = b"", fin: bool = True
     ):
         """
         Utility function used to send frames from server to client
@@ -321,7 +322,7 @@ class WSPortal:
         """
         return self.__closed
 
-    async def recv(self, timeout: float = None) -> str | bytes:
+    async def recv(self, timeout: float = None) -> Union[str, bytes]:
         """
         Recieves a full frame from the client
 
@@ -373,7 +374,7 @@ class WSPortal:
         except asyncio.TimeoutError as err:
             raise WSRecvTimeoutError() from err
 
-    def send(self, payload: str | bytes):
+    def send(self, payload: Union[str, bytes]):
         """
         Sends a payload for the client to recieve
 

@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
 import socket
-from typing import AsyncGenerator, Callable
+from typing import AsyncGenerator, Callable, Union
 from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
@@ -138,7 +138,7 @@ class Response:
 
     def __init__(
         self,
-        status_code: int | HTTPStatus = HTTPStatus.OK,
+        status_code: Union[int, HTTPStatus] = HTTPStatus.OK,
         body: str = "",
         headers: dict[str, any] = None,
     ):

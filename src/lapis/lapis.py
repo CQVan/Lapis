@@ -12,6 +12,7 @@ import sys
 import re
 from threading import Thread
 from datetime import datetime
+from typing import Optional
 
 from lapis.protocols.websocket import WebSocketProtocol
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
@@ -32,7 +33,7 @@ class Lapis:
 
     cfg: ServerConfig
 
-    __s: socket.socket | None
+    __s: Optional[socket.socket]
     __paths: dict
     __taken_endpoints: list[str]
     __protocols: list[type[Protocol]]
@@ -42,7 +43,7 @@ class Lapis:
 
     __running: bool
 
-    def __init__(self, config: ServerConfig | None = None):
+    def __init__(self, config: Optional[ServerConfig] = None):
         self.cfg = config if config is not None else ServerConfig()
         self.__s = None
         self.__paths = {}
@@ -186,7 +187,7 @@ class Lapis:
 
     def __has_endpoint_path(
         self, base_url: str
-    ) -> tuple[dict[str, any] | None, dict[str, str]]:
+    ) -> tuple[Optional[dict[str, any]], dict[str, str]]:
         # Convert the URL into parts, ignoring the leading slash
         path_parts = pathlib.Path(base_url.lstrip("/")).parts
 
@@ -195,7 +196,7 @@ class Lapis:
 
     def _search_tree(
         self, current_level: dict, remaining_parts: tuple[str, ...], slugs: dict
-    ) -> tuple[dict | None, dict]:
+    ) -> tuple[Optional[dict], dict]:
 
         # Base case
         if not remaining_parts:

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import socket
 import json
 import sys
-from typing import get_origin, get_type_hints
+from typing import Union, get_origin, get_type_hints
 import pathlib
 
 
@@ -25,7 +25,7 @@ class ServerConfig:
     protocol_configs: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
-    def from_json(cls, file_path: str | pathlib.Path) -> "ServerConfig":
+    def from_json(cls, file_path: Union[str, pathlib.Path]) -> "ServerConfig":
         """
         Generates a ServerConfig object from the json file found at the file path
 
