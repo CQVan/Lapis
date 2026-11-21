@@ -15,8 +15,6 @@ authors = [
   { name = "Chandler Van" },
 ]
 
-
-
 license = {text = "MIT"}
 
 classifiers = [
@@ -29,3 +27,6 @@ classifiers = [
 Homepage = "https://github.com/CQVan/Lapis"
 Wiki = "https://github.com/CQVan/Lapis/wiki"
 Issues = "https://github.com/CQVan/Lapis/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]

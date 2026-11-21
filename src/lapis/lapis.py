@@ -30,22 +30,25 @@ class Lapis:
     The Lapis class implements the centeral object used to run a Lapis REST server
     """
 
-    cfg: ServerConfig = ServerConfig()
+    cfg: ServerConfig
 
-    __s: socket.socket = None
-    __paths: dict = {}
-    __taken_endpoints: list[str] = []
-    __protocols: list[type[Protocol]] = []
+    __s: socket.socket | None
+    __paths: dict
+    __taken_endpoints: list[str]
+    __protocols: list[type[Protocol]]
 
     __slug_pattern = re.compile(r"\[[^\]]+\]")
     __path_pattern = re.compile(r"^\/([a-zA-Z0-9._-]+)(\/[a-zA-Z0-9._-]+)*$")
 
-    __running: bool = False
+    __running: bool
 
     def __init__(self, config: ServerConfig | None = None):
-
-        if config is not None:
-            self.cfg = config
+        self.cfg = config if config is not None else ServerConfig()
+        self.__s = None
+        self.__paths = {}
+        self.__taken_endpoints = []
+        self.__protocols = []
+        self.__running = False
 
         self.__register_protocol(HTTP1Protocol)
         self.__register_protocol(WebSocketProtocol)
