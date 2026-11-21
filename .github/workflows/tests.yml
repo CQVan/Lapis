@@ -43,6 +43,12 @@ jobs:
                   f"{version.major}.{version.minor}"
                   for release in releases
                   if release["stable"]
+                  and any(
+                      file["platform"] == "linux"
+                      and file.get("platform_version") == "24.04"
+                      and file["arch"] == "x64"
+                      for file in release["files"]
+                  )
                   for version in [Version(release["version"])]
                   if specifiers.contains(version)
               },
@@ -55,7 +61,7 @@ jobs:
               print(f"matrix={json.dumps(versions)}", file=output)
           PY
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: versions
     strategy:
       matrix:
