@@ -4,12 +4,27 @@ Module containing the HTTP 1/1.1 protocol implementation for Lapis server
 
 from dataclasses import dataclass
 from datetime import datetime
-from http import HTTPMethod, HTTPStatus
+from enum import Enum
+from http import HTTPStatus
 import socket
 from typing import AsyncGenerator, Callable
 from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
+
+try:
+    from http import HTTPMethod
+except ImportError:
+    class HTTPMethod(str, Enum):
+        CONNECT = "CONNECT"
+        DELETE = "DELETE"
+        GET = "GET"
+        HEAD = "HEAD"
+        OPTIONS = "OPTIONS"
+        PATCH = "PATCH"
+        POST = "POST"
+        PUT = "PUT"
+        TRACE = "TRACE"
 
 
 @dataclass
