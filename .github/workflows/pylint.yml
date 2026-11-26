@@ -3,19 +3,61 @@ name: Pylint
 on: [push]
 
 jobs:
-  build:
+  versions:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v6
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: uv sync --locked --group lint
-    - name: Analysing the code with pylint
-      run: uv run --locked pylint src tests
+    - id: resolve
+      name: Resolve supported Python versions
+      run: |
+        uv run --no-project --python 3.11 --with packaging python - <<'PY'
+        import json
+        import os
+        import tomllib
+        from urllib.request import urlopen
+
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        with open("pyproject.toml", "rb") as project_file:
+            requirement = tomllib.load(project_file)["project"]["requires-python"]
+        specifiers = SpecifierSet(requirement)
+
+        with urlopen("https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json") as response:
+            releases = json.load(response)
+
+        versions = sorted(
+            {
+                f"{version.major}.{version.minor}"
+                for release in releases
+                if release["stable"]
+                and any(
+                    file["platform"] == "linux" and file["arch"] == "x64"
+                    for file in release["files"]
+                )
+                for version in [Version(release["version"])]
+                if specifiers.contains(version)
+            },
+            key=Version,
+        )
+        if not versions:
+            raise SystemExit(f"No stable Python releases satisfy {requirement!r}")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            print(f"matrix={json.dumps(versions)}", file=output)
+        PY
+  build:
+    runs-on: ubuntu-latest
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v6
+    - name: Run Pylint
+      run: uv run --locked --python ${{ matrix.python-version }} --group lint pylint src tests
