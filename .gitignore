@@ -1,3 +1,23 @@
+# Python-generated files
 __pycache__/
-venv/
-TODO.md
+*.py[cod]
+
+# Build artifacts
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.venv/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+
+# Editor settings
+.idea/
+.vscode/
+*.swp
+*.swo

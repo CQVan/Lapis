@@ -230,63 +230,111 @@ class Lapis:
 
         return None, {}
 
-    def _handle_request(self, client: socket.socket):
-        data = client.recv(self.cfg.max_request_size)
+    @staticmethod
+    def _get_content_length(data: bytes) -> int:
+        headers = data.split(b"\r\n\r\n", 1)[0]
+        for line in headers.split(b"\r\n")[1:]:
+            if b":" not in line:
+                continue
+            key, value = line.split(b":", 1)
+            if key.strip().lower() == b"content-length":
+                try:
+                    content_length = int(value.strip())
+                except ValueError as exc:
+                    raise BadRequest("Invalid Content-Length") from exc
+                if content_length < 0:
+                    raise BadRequest("Invalid Content-Length")
+                return content_length
+        return 0
 
-        try:
-            request: Request = Request(data)
+    def _read_request_data(self, client: socket.socket) -> Optional[bytes]:
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = client.recv(self.cfg.max_request_size)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > self.cfg.max_request_size:
+                self.__send_response(
+                    client, Response(status_code=413, body="Request Entity Too Large")
+                )
+                return None
 
-        except BadRequest:
-            self.__send_response(
-                client, Response(status_code=400, body="400 Bad Request")
-            )
-            client.close()
-            return
+        if b"\r\n\r\n" in data:
+            content_length = self._get_content_length(data)
+            header_end = data.find(b"\r\n\r\n") + 4
+            if header_end - 4 + content_length > self.cfg.max_request_size:
+                self.__send_response(
+                    client, Response(status_code=413, body="Request Entity Too Large")
+                )
+                return None
 
-        try:
-            endpoint, request.slugs = self.__has_endpoint_path(request.base_url)
-
-            if endpoint is None:
-                raise FileNotFoundError()
-
-            # Finds the correct protocol based on the inital request
-            for protocol_cls in self.__protocols:
-                protocol: Protocol = protocol_cls()
-
-                if not protocol.identify(initial_data=data):
-                    continue
-
-                if not protocol.handshake(client=client):
-                    raise BadRequest("Failed Handshake with protocol!")
-
-                target_endpoints = protocol.get_target_endpoints()
-
-                endpoints = {
-                    f"/{k}": endpoint[f"/{k}"]
-                    for k in target_endpoints
-                    if f"/{k}" in endpoint
-                }
-
-                endpoints = {key.lstrip("/"): value for key, value in endpoints.items()}
-
-                if inspect.iscoroutinefunction(protocol.handle):
-                    asyncio.run(
-                        protocol.handle(
-                            client=client,
-                            slugs=request.slugs,
-                            endpoints=endpoints,
-                        )
+            while len(data) - header_end < content_length:
+                chunk = client.recv(self.cfg.max_request_size)
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > self.cfg.max_request_size:
+                    self.__send_response(
+                        client,
+                        Response(status_code=413, body="Request Entity Too Large"),
                     )
-                else:
+                    return None
+
+        return data
+
+    def _dispatch_request(self, client: socket.socket, data: bytes, request: Request):
+        endpoint, request.slugs = self.__has_endpoint_path(request.base_url)
+
+        if endpoint is None:
+            raise FileNotFoundError()
+
+        # Finds the correct protocol based on the initial request
+        for protocol_cls in self.__protocols:
+            protocol: Protocol = protocol_cls()
+
+            if not protocol.identify(initial_data=data):
+                continue
+
+            if not protocol.handshake(client=client):
+                raise BadRequest("Failed Handshake with protocol!")
+
+            target_endpoints = protocol.get_target_endpoints()
+
+            endpoints = {
+                f"/{key}": endpoint[f"/{key}"]
+                for key in target_endpoints
+                if f"/{key}" in endpoint
+            }
+
+            endpoints = {key.lstrip("/"): value for key, value in endpoints.items()}
+
+            if inspect.iscoroutinefunction(protocol.handle):
+                asyncio.run(
                     protocol.handle(
                         client=client,
                         slugs=request.slugs,
                         endpoints=endpoints,
                     )
+                )
+            else:
+                protocol.handle(
+                    client=client,
+                    slugs=request.slugs,
+                    endpoints=endpoints,
+                )
 
-                break
-            else:  # No Protocol was found to be compatible
-                raise BadRequest("No Compatible Protocol Found!")
+            break
+        else:  # No Protocol was found to be compatible
+            raise BadRequest("No Compatible Protocol Found!")
+
+    def _handle_request(self, client: socket.socket):
+        try:
+            data = self._read_request_data(client)
+            if data is None:
+                return
+            request: Request = Request(data)
+            self._dispatch_request(client, data, request)
 
         except BadRequest:
             response: Response = Response(status_code=400, body="400 Bad Request")
