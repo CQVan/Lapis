@@ -262,8 +262,8 @@ class HTTP1Protocol(Protocol):
 
         self.request.slugs = slugs
 
-        if self.request.method in endpoints:
-            response: Response = await endpoints[self.request.method](self.request)
+        if self.request.method.name in endpoints:
+            response: Response = await endpoints[self.request.method.name](self.request)
 
             ip, _ = client.getpeername()
 
@@ -296,7 +296,7 @@ class HTTP1Protocol(Protocol):
             allowed = ", ".join(
                 method.name
                 for method in HTTPMethod
-                if method in endpoints
+                if method.name in endpoints
             )
             response = Response(
                 status_code=405,

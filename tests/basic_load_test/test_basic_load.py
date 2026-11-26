@@ -1,4 +1,28 @@
+import asyncio
+from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
+
+from lapis import Response
+from lapis.protocols.http1 import HTTP1Protocol
+
+
+def test_dispatches_http_method_by_name(test_client_factory):
+    class Method(Enum):
+        GET = "method-value"
+
+    async def get_handler(_request):
+        return Response(body="GET handler")
+
+    protocol = HTTP1Protocol()
+    protocol.request = SimpleNamespace(method=Method.GET)
+    client = test_client_factory(b"")
+
+    asyncio.run(protocol.handle(client, {}, {"GET": get_handler}))
+
+    response = bytes(client.sent_data)
+    assert response.startswith(b"HTTP/1.1 200 OK\r\n")
+    assert response.endswith(b"GET handler")
 
 
 def test_loads_and_serves_api_routes(server_factory, send_request):
