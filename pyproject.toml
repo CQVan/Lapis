@@ -30,3 +30,6 @@ Issues = "https://github.com/CQVan/Lapis/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+
+[dependency-groups]
+lint = ["black", "pylint"]

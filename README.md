@@ -30,3 +30,20 @@ server.run("localhost", 80)
 ```
 
 You can now send an HTTP GET request to localhost:80 and recieve the famous **Hello World!** response!
+
+## Development
+
+Install the project and its test and lint dependencies:
+
+```sh
+uv sync --locked --extra test --group lint
+```
+
+Run the tests, format and lint the code, or build distributions directly with uv:
+
+```sh
+uv run --locked python -m pytest -v
+uv run --locked black .
+uv run --locked pylint src tests
+uv build
+```
