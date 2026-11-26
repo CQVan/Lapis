@@ -45,10 +45,7 @@ def server_factory(monkeypatch):
 def send_request():
     def send(server, target: str, headers: str = "") -> bytes:
         request = (
-            f"GET {target} HTTP/1.1\r\n"
-            f"Host: localhost\r\n"
-            f"{headers}"
-            "\r\n"
+            f"GET {target} HTTP/1.1\r\n" f"Host: localhost\r\n" f"{headers}" "\r\n"
         ).encode("ascii")
         client = TestClient(request)
         server._handle_request(client)
