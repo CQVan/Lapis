@@ -6,16 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
-import socket
-from typing import AsyncGenerator, Callable, Union
-from urllib.parse import parse_qsl, urlparse
-
-from lapis.server_types import BadRequest, Protocol
 
 try:
     from http import HTTPMethod
 except ImportError:
+
     class HTTPMethod(str, Enum):
+        """HTTP methods for Python versions before 3.11."""
+
         CONNECT = "CONNECT"
         DELETE = "DELETE"
         GET = "GET"
@@ -25,6 +23,12 @@ except ImportError:
         POST = "POST"
         PUT = "PUT"
         TRACE = "TRACE"
+
+import socket
+from typing import AsyncGenerator, Callable, Union
+from urllib.parse import parse_qsl, urlparse
+
+from lapis.server_types import BadRequest, Protocol
 
 
 @dataclass
@@ -45,6 +49,20 @@ class Request:
     The object class for handling HTTP 1/1.1 requests from clients
     """
 
+    @staticmethod
+    def _parse_headers(lines: list[str], protocol: str) -> dict[str, str]:
+        headers = {}
+        for line in lines:
+            if ":" not in line:
+                raise BadRequest("Malformed header")
+            key, value = line.split(":", 1)
+            headers[key.strip().lower()] = value.strip()
+
+        if protocol == "HTTP/1.1" and "host" not in headers:
+            raise BadRequest("Missing Host header")
+
+        return headers
+
     def __init__(self, data: bytes):
         try:
             text = data.decode("iso-8859-1")
@@ -61,23 +79,20 @@ class Request:
         if protocol not in ("HTTP/1.0", "HTTP/1.1"):
             raise BadRequest("Unsupported protocol")
 
-        headers_dict = {}
-        for line in lines[1:]:
-            if ":" not in line:
-                raise BadRequest("Malformed header")
-            key, value = line.split(":", 1)
-            headers_dict[key.strip()] = value.strip()
-
-        if protocol == "HTTP/1.1" and "Host" not in headers_dict:
-            raise BadRequest("Missing Host header")
+        headers_dict = self._parse_headers(lines[1:], protocol)
 
         try:
             parsed = urlparse(url)
         except ValueError as exc:
             raise BadRequest("Bad URL") from exc
 
+        try:
+            method = HTTPMethod[method_str.upper()]
+        except KeyError as exc:
+            raise BadRequest("Unsupported method") from exc
+
         self.__header_data = RequestHeader(
-            method=HTTPMethod[method_str.upper()],
+            method=method,
             base_url=parsed.path,
             query_params=dict(parse_qsl(parsed.query)),
             headers=headers_dict,
@@ -278,4 +293,17 @@ class HTTP1Protocol(Protocol):
 
                 print(f"{current_time} {response.status_code.value} -> {ip}")
         else:
-            raise FileNotFoundError()
+            allowed = ", ".join(
+                method.name
+                for method in HTTPMethod
+                if method in endpoints
+            )
+            response = Response(
+                status_code=405,
+                body="Method Not Allowed",
+                headers={
+                    "Content-Type": "text/plain",
+                    "Allow": allowed,
+                },
+            )
+            client.sendall(response.to_bytes())
