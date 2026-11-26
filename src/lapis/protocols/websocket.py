@@ -11,7 +11,7 @@ import hashlib
 from enum import Enum
 from typing import Optional, Union
 
-from lapis.server_types import Protocol
+from lapis.server_types import BadRequest, Protocol
 from lapis.protocols.http1 import Request, Response
 
 
@@ -307,7 +307,10 @@ class WSPortal:
                 elif frame.opcode == WSOpcode.CLOSE:
                     self.close()
                 elif frame.opcode == WSOpcode.PONG:
-                    if not self.__pong_waiters.done():
+                    if (
+                        self.__pong_waiters is not None
+                        and not self.__pong_waiters.done()
+                    ):
                         self.__pong_waiters.set_result(True)
                 else:
                     await self.__recv_queue.put(frame)
@@ -359,7 +362,17 @@ class WSPortal:
                     self.close(1002)
                     raise WSRecvInvalidFrameError("Expected continuation frame")
 
-                result += frame.data if is_text else frame.data.decode()
+                continuation = frame.data
+                if is_text:
+                    if not isinstance(continuation, bytes):
+                        self.close(1002)
+                        raise WSRecvInvalidFrameError("Mixed frame types")
+                    result += continuation.decode("utf-8")
+                else:
+                    if not isinstance(continuation, bytes):
+                        self.close(1002)
+                        raise WSRecvInvalidFrameError("Mixed frame types")
+                    result += continuation
 
                 if frame.fin:
                     break
@@ -468,12 +481,16 @@ class WebSocketProtocol(Protocol):
         return ["WEBSOCKET"]
 
     def identify(self, initial_data) -> bool:
-        self.inital_req: Request = Request(initial_data)
-
-        if self.inital_req.headers.get("Connection") != "Upgrade":
+        try:
+            self.inital_req: Request = Request(initial_data)
+        except (BadRequest, ValueError):
             return False
 
-        if self.inital_req.headers.get("Upgrade", "").lower() != "websocket":
+        connection = self.inital_req.headers.get("connection", "")
+        if "upgrade" not in connection.lower():
+            return False
+
+        if self.inital_req.headers.get("upgrade", "").lower() != "websocket":
             return False
 
         return True
@@ -485,11 +502,11 @@ class WebSocketProtocol(Protocol):
             client.send(Response(400).to_bytes())
             return False
 
-        if "Host" not in req.headers:
+        if "host" not in req.headers:
             client.send(Response(400).to_bytes())
             return False
 
-        version = req.headers.get("Sec-WebSocket-Version")
+        version = req.headers.get("sec-websocket-version")
 
         if version != "13":
             resp = Response(
@@ -501,7 +518,7 @@ class WebSocketProtocol(Protocol):
 
         # Create accept key
 
-        key = req.headers.get("Sec-WebSocket-Key")
+        key = req.headers.get("sec-websocket-key")
         if not key:
             client.send(Response(400).to_bytes())
             return False
