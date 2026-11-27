@@ -9,7 +9,6 @@ import pytest
 
 from lapis import ServerConfig
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "basic_load"
 
 

@@ -6,7 +6,6 @@ import pytest
 from lapis import ServerConfig
 from lapis.server_types import BadConfigError
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "server_config"
 TEST_FILE = FIXTURE_DIR / "test.py"
 

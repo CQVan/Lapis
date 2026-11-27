@@ -5,7 +5,6 @@ import pytest
 from lapis import Lapis
 from lapis.server_types import BadAPIDirectory
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slugs"
 
 
@@ -22,6 +21,20 @@ def test_resolves_slug_routes_and_captures_values(server_factory, send_request):
         response = send_request(server, path)
         assert response.startswith(b"HTTP/1.1 200 OK\r\n")
         assert response.endswith(expected_slugs)
+
+
+def test_search_skips_incomplete_slug_branch(server_factory):
+    server = server_factory(FIXTURE_DIR)
+    handler = object()
+    routes = {
+        "[slug2]": {"maybe": {"[slug3]": {"/GET": object()}}},
+        "[slug1]": {"/GET": handler},
+    }
+
+    endpoint, slugs = server._search_tree(routes, ("alice",), {})
+
+    assert endpoint == {"/GET": handler}
+    assert slugs == {"slug1": "alice"}
 
 
 def test_rejects_duplicate_slugs(tmp_path, monkeypatch):

@@ -6,7 +6,6 @@ import pytest
 from lapis import Lapis, Protocol, Request, ServerConfig
 from lapis.server_types import ProtocolEndpointError
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "basic_load"
 
 

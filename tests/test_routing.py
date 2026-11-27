@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from lapis import Response
 from lapis.protocols.http1 import HTTP1Protocol
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "basic_load"
 
 

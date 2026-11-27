@@ -677,7 +677,7 @@ wheels = [
 
 [[package]]
 name = "lapis-api"
-version = "0.2.5"
+version = "0.2.5.post1"
 source = { editable = "." }
 
 [package.optional-dependencies]
