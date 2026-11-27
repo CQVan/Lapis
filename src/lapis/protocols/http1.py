@@ -2,14 +2,18 @@
 Module containing the HTTP 1/1.1 protocol implementation for Lapis server
 """
 
+import json
+import socket
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from http import HTTPStatus
+from typing import AsyncGenerator, Callable, Union
+from urllib.parse import parse_qs, urlparse
 
 try:
-    from http import HTTPMethod
+    from http import HTTPMethod, HTTPStatus
 except ImportError:
+    from http import HTTPStatus
 
     class HTTPMethod(str, Enum):
         """HTTP methods for Python versions before 3.11."""
@@ -24,9 +28,6 @@ except ImportError:
         PUT = "PUT"
         TRACE = "TRACE"
 
-import socket
-from typing import AsyncGenerator, Callable, Union
-from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
 
@@ -39,7 +40,7 @@ class RequestHeader:
 
     method: HTTPMethod
     base_url: str
-    query_params: dict[str, str]
+    query_params: dict[str, list[str]]
     headers: dict[str, str]
     protocol: str
 
@@ -73,6 +74,7 @@ class Request:
             raise BadRequest("Malformed HTTP request")
 
         head, self.__body = text.split("\r\n\r\n", 1)
+        self.__body_bytes = self.__body.encode("iso-8859-1")
         lines = head.split("\r\n")
 
         method_str, url, protocol = lines[0].split(" ", 2)
@@ -94,7 +96,7 @@ class Request:
         self.__header_data = RequestHeader(
             method=method,
             base_url=parsed.path,
-            query_params=dict(parse_qsl(parsed.query)),
+            query_params=parse_qs(parsed.query),
             headers=headers_dict,
             protocol=protocol,
         )
@@ -132,10 +134,8 @@ class Request:
         return self.__header_data.base_url
 
     @property
-    def query_params(self) -> dict[str, str]:
-        """
-        Returns a dictionary containing the URL query string parameters.
-        """
+    def query_params(self) -> dict[str, list[str]]:
+        """Returns every value for each URL query parameter."""
         return self.__header_data.query_params
 
     @property
@@ -144,6 +144,13 @@ class Request:
         Returns the raw entity body of the HTTP request as a string.
         """
         return self.__body
+
+    def json(self):
+        """Decodes a UTF-8 JSON request body."""
+        try:
+            return json.loads(self.__body_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as err:
+            raise BadRequest("Invalid JSON body") from err
 
 
 class Response:
@@ -173,6 +180,19 @@ class Response:
         )
         self.cookies = {}
         self.body = body
+
+    @classmethod
+    def json(
+        cls,
+        data,
+        status_code: Union[int, HTTPStatus] = HTTPStatus.OK,
+        headers: dict[str, any] = None,
+    ) -> "Response":
+        """Creates a JSON response with the appropriate content type."""
+        response_headers = dict(headers or {})
+        if not any(key.lower() == "content-type" for key in response_headers):
+            response_headers["Content-Type"] = "application/json"
+        return cls(status_code, json.dumps(data), response_headers)
 
     @property
     def reason_phrase(self):
@@ -294,9 +314,7 @@ class HTTP1Protocol(Protocol):
                 print(f"{current_time} {response.status_code.value} -> {ip}")
         else:
             allowed = ", ".join(
-                method.name
-                for method in HTTPMethod
-                if method.name in endpoints
+                method.name for method in HTTPMethod if method.name in endpoints
             )
             response = Response(
                 status_code=405,

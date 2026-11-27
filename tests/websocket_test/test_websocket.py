@@ -4,6 +4,8 @@ import pytest
 
 from lapis.protocols.websocket import (
     WSPortal,
+    WSPortalClosedError,
+    WSRecvTimeoutError,
     WSFrame,
     WSOpcode,
     WebSocketProtocol,
@@ -95,7 +97,9 @@ def test_websocket_rejects_unknown_http_method(test_client_factory):
         (WSOpcode.BINARY, (b"\x00\x01", b"\xfe\xff"), b"\x00\x01\xfe\xff"),
     ],
 )
-def test_receives_fragmented_websocket_frames(test_client_factory, opcode, parts, expected):
+def test_receives_fragmented_websocket_frames(
+    test_client_factory, opcode, parts, expected
+):
     async def receive():
         portal = WSPortal.__new__(WSPortal)
         portal._WSPortal__client = test_client_factory(b"")
@@ -103,7 +107,9 @@ def test_receives_fragmented_websocket_frames(test_client_factory, opcode, parts
         portal._WSPortal__recv_queue = asyncio.Queue()
 
         first_payload = parts[0].encode() if opcode is WSOpcode.TEXT else parts[0]
-        continuation_payload = parts[1].encode() if opcode is WSOpcode.TEXT else parts[1]
+        continuation_payload = (
+            parts[1].encode() if opcode is WSOpcode.TEXT else parts[1]
+        )
 
         portal._WSPortal__recv_queue.put_nowait(
             WSFrame(bytes([opcode.value, len(first_payload)]) + first_payload)
@@ -146,3 +152,59 @@ def test_reader_ignores_unsolicited_pong(test_client_factory):
 
     with pytest.raises(ConnectionResetError):
         asyncio.run(read())
+
+
+def test_sends_extended_websocket_payload(test_client_factory):
+    portal = WSPortal.__new__(WSPortal)
+    portal._WSPortal__client = test_client_factory(b"")
+    portal._WSPortal__closed = False
+
+    payload = b"x" * 126
+    portal._WSPortal__send_frame(WSOpcode.BINARY, payload)
+
+    sent = bytes(portal._WSPortal__client.sent_data)
+    assert sent[:4] == b"\x82\x7e\x00\x7e"
+    assert sent[4:] == payload
+
+
+def test_ping_timeout_returns_false(test_client_factory):
+    async def ping():
+        portal = WSPortal.__new__(WSPortal)
+        portal._WSPortal__client = test_client_factory(b"")
+        portal._WSPortal__closed = False
+        portal._WSPortal__pong_waiters = None
+        return await portal.ping(0.001)
+
+    assert asyncio.run(ping()) is False
+
+
+def test_receive_timeout_raises_websocket_error(test_client_factory):
+    async def receive():
+        portal = WSPortal.__new__(WSPortal)
+        portal._WSPortal__client = test_client_factory(b"")
+        portal._WSPortal__closed = False
+        portal._WSPortal__recv_queue = asyncio.Queue()
+        await portal.recv(timeout=0.001)
+
+    with pytest.raises(WSRecvTimeoutError):
+        asyncio.run(receive())
+
+
+def test_closed_portal_rejects_send(test_client_factory):
+    portal = WSPortal.__new__(WSPortal)
+    portal._WSPortal__client = test_client_factory(b"")
+    portal._WSPortal__closed = True
+
+    with pytest.raises(WSPortalClosedError):
+        portal.send("hello")
+
+
+def test_close_marks_portal_closed(test_client_factory):
+    portal = WSPortal.__new__(WSPortal)
+    portal._WSPortal__client = test_client_factory(b"")
+    portal._WSPortal__closed = False
+
+    portal.close()
+
+    assert portal.closed
+    assert b"\x88\x02\x03\xe8" in bytes(portal._WSPortal__client.sent_data)

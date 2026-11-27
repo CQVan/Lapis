@@ -10,7 +10,7 @@ import pathlib
 import runpy
 import sys
 import re
-from threading import Thread
+from threading import BoundedSemaphore, Thread
 from datetime import datetime
 from typing import Optional
 
@@ -66,24 +66,49 @@ class Lapis:
         :param port: The port for the server to listen on
         :type port: int
         """
+        self.cfg.validate()
         self.__s = socket.socket()
         self.__s.bind((ip, port))
         self.__s.listen()
 
         self.__running = True
         print(f"{self.cfg.server_name} is now listening on http://{ip}:{port}")
+        connection_slots = (
+            BoundedSemaphore(self.cfg.max_concurrent_connections)
+            if self.cfg.max_concurrent_connections is not None
+            else None
+        )
 
         try:
             while True:
                 readable, _, _ = select.select([self.__s], [], [], 0.1)
                 if self.__s in readable:
-                    client, _ = self.__s.accept()
-                    t = Thread(target=self._handle_request, args=(client,), daemon=True)
-                    t.start()
+                    self._accept_request(connection_slots)
         except KeyboardInterrupt:
             pass
         finally:
             self.__close()
+
+    def _accept_request(self, connection_slots: Optional[BoundedSemaphore]):
+        if connection_slots is not None:
+            connection_slots.acquire()
+        client = None
+        try:
+            client, _ = self.__s.accept()
+            client.settimeout(self.cfg.request_timeout)
+            Thread(
+                target=self._handle_request,
+                args=(client, connection_slots),
+                daemon=True,
+            ).start()
+        except BaseException:
+            try:
+                if client is not None:
+                    client.close()
+            finally:
+                if connection_slots is not None:
+                    connection_slots.release()
+            raise
 
     def __register_protocol(self, protocol: type[Protocol]):
 
@@ -292,6 +317,9 @@ class Lapis:
         # Finds the correct protocol based on the initial request
         for protocol_cls in self.__protocols:
             protocol: Protocol = protocol_cls()
+            protocol.config = self.cfg.protocol_configs.get(
+                protocol.get_config_key(), {}
+            )
 
             if not protocol.identify(initial_data=data):
                 continue
@@ -328,13 +356,17 @@ class Lapis:
         else:  # No Protocol was found to be compatible
             raise BadRequest("No Compatible Protocol Found!")
 
-    def _handle_request(self, client: socket.socket):
+    def _handle_request(self, client: socket.socket, connection_slots=None):
         try:
             data = self._read_request_data(client)
             if data is None:
                 return
             request: Request = Request(data)
             self._dispatch_request(client, data, request)
+
+        except (TimeoutError, socket.timeout):
+            response = Response(status_code=408, body="408 Request Timeout")
+            self.__send_response(client, response)
 
         except BadRequest:
             response: Response = Response(status_code=400, body="400 Bad Request")
@@ -350,7 +382,11 @@ class Lapis:
             self.__send_response(client, response)
 
         finally:
-            client.close()
+            try:
+                client.close()
+            finally:
+                if connection_slots is not None:
+                    connection_slots.release()
 
     def __send_response(self, client: socket.socket, response: Response):
         client.sendall(response.to_bytes())

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import socket
 import json
 import sys
-from typing import Union, get_origin, get_type_hints
+from typing import Union, get_args, get_origin, get_type_hints
 import pathlib
 
 
@@ -22,6 +22,8 @@ class ServerConfig:
     server_name: str = "Server"
     path_script_name: str = "path"
 
+    max_concurrent_connections: Union[int, None] = 64
+    request_timeout: Union[int, None] = 10
     protocol_configs: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
@@ -54,12 +56,23 @@ class ServerConfig:
 
                 if not cls._check_type(value, expected_type):
                     raise BadConfigError(
-                        f'"{key}" must be of type {expected_type.__name__}'
+                        f'"{key}" must be of type '
+                        f'{getattr(expected_type, "__name__", expected_type)}'
                     )
 
                 setattr(config, key, value)
 
+        config.validate()
         return config
+
+    def validate(self):
+        """Checks configured connection limits."""
+        for key in ("max_concurrent_connections", "request_timeout"):
+            value = getattr(self, key)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise BadConfigError(f'"{key}" must be greater than zero')
 
     @classmethod
     def _check_type(cls, value, expected_type) -> bool:
@@ -70,6 +83,9 @@ class ServerConfig:
 
         if origin is None:
             return isinstance(value, expected_type)
+
+        if origin is Union:
+            return any(cls._check_type(value, arg) for arg in get_args(expected_type))
 
         if origin is dict:
             return isinstance(value, dict)
@@ -114,6 +130,8 @@ class Protocol(ABC):
     """
     An abstract class used for the server to be able to handle different protocals (ex: HTTP/1.1)
     """
+
+    config: dict
 
     @abstractmethod
     def get_config_key(self) -> str:
