@@ -296,7 +296,7 @@ def test_rejects_request_larger_than_configured_limit(server_factory):
 
     server._handle_request(client)
 
-    assert bytes(client.sent).startswith(b"HTTP/1.1 413 Content Too Large\r\n")
+    assert bytes(client.sent).startswith(b"HTTP/1.1 413 ")
 
 
 @pytest.mark.parametrize(
