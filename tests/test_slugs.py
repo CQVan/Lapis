@@ -5,7 +5,6 @@ import pytest
 from lapis import Lapis
 from lapis.server_types import BadAPIDirectory
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slugs"
 
 

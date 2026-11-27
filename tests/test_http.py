@@ -6,7 +6,6 @@ from lapis import Request, Response, ServerConfig
 from lapis.protocols.http1 import HTTP1Protocol
 from lapis.server_types import BadRequest
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "basic_load"
 
 
