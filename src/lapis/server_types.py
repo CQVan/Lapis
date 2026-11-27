@@ -142,6 +142,8 @@ class Protocol(ABC):
         :rtype: str
         """
 
+        raise NotImplementedError
+
     @abstractmethod
     def get_target_endpoints(self) -> list[str]:
         """

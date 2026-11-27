@@ -68,7 +68,7 @@ class Request:
         try:
             text = data.decode("iso-8859-1")
         except UnicodeDecodeError as err:
-            raise BadRequest("Invalid encoding") from err
+            raise BadRequest("Invalid Encoding") from err
 
         if "\r\n\r\n" not in text:
             raise BadRequest("Malformed HTTP request")
@@ -77,7 +77,10 @@ class Request:
         self.__body_bytes = self.__body.encode("iso-8859-1")
         lines = head.split("\r\n")
 
-        method_str, url, protocol = lines[0].split(" ", 2)
+        try:
+            method_str, url, protocol = lines[0].split(" ", 2)
+        except ValueError as exc:
+            raise BadRequest("Malformed HTTP request") from exc
         if protocol not in ("HTTP/1.0", "HTTP/1.1"):
             raise BadRequest("Unsupported protocol")
 

@@ -1,8 +1,11 @@
 from pathlib import Path
 
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "streamed_response"
+
+
 def test_streams_chunked_response(server_factory, send_request):
-    server = server_factory(Path(__file__))
+    server = server_factory(FIXTURE_DIR)
 
     response = send_request(server, "/")
     headers, body = response.split(b"\r\n\r\n", 1)
