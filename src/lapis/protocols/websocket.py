@@ -139,13 +139,11 @@ class WSFrame:
         return self.__data[start : start + 4]
 
     @property
-    def data(self) -> Union[str, bytes]:
+    def raw_data(self) -> bytes:
         """
-        Returns the payload data of the frame
+        Returns the unmasked payload bytes without decoding them
 
-        returns either string or bytes depending on the opcode
-
-        :rtype: str | bytes
+        :rtype: bytes
         """
         header_len = self.__header_length()
         offset = header_len + (4 if self.masked else 0)
@@ -155,6 +153,19 @@ class WSFrame:
         # Unmask if needed
         if self.masked:
             payload = bytes(b ^ self.masking_key[i % 4] for i, b in enumerate(payload))
+
+        return payload
+
+    @property
+    def data(self) -> Union[str, bytes]:
+        """
+        Returns the payload data of the frame
+
+        returns either string or bytes depending on the opcode
+
+        :rtype: str | bytes
+        """
+        payload = self.raw_data
 
         # Decode based on opcode
         if self.opcode == WSOpcode.TEXT:
@@ -201,8 +212,6 @@ class WSPortal:
 
         self.__client: socket.socket = client
         self.__client.setblocking(False)
-
-        self.inital_req: Request = None
 
         self.__recv_queue: asyncio.Queue[WSFrame] = asyncio.Queue[WSFrame]()
         self.__pong_waiters = None
@@ -281,6 +290,10 @@ class WSPortal:
                     payload_len = length_bytes
                     length_bytes = b""
 
+                if payload_len >= 65536:
+                    self.close(1009)
+                    return
+
                 # recieve mask if required
                 has_mask: bool = bool(header[1] & 0x80)
                 mask: bytes = await self.__read_exact(4) if has_mask else b""
@@ -291,32 +304,24 @@ class WSPortal:
                 # Build WSFrame correctly
                 frame: WSFrame = WSFrame(header + length_bytes + mask + body)
 
-                # react based on opcode
-                if frame.opcode == WSOpcode.PING:
-                    if not frame.fin:  # Cannot send fragmented control frames
-                        self.close(1002)
-                    else:
-                        self.__send_frame(
-                            opcode=WSOpcode.PONG,
-                            payload=(
-                                frame.data
-                                if isinstance(frame.data, bytes)
-                                else frame.data.encode()
-                            ),
-                        )
-                elif frame.opcode == WSOpcode.CLOSE:
-                    self.close()
-                elif frame.opcode == WSOpcode.PONG:
-                    if (
-                        self.__pong_waiters is not None
-                        and not self.__pong_waiters.done()
-                    ):
-                        self.__pong_waiters.set_result(True)
-                else:
-                    await self.__recv_queue.put(frame)
+                await self.__handle_frame(frame)
         except Exception:
             self.close(1011)
             raise
+
+    async def __handle_frame(self, frame: WSFrame):
+        if frame.opcode == WSOpcode.PING:
+            if not frame.fin:  # Cannot send fragmented control frames
+                self.close(1002)
+            else:
+                self.__send_frame(opcode=WSOpcode.PONG, payload=frame.raw_data)
+        elif frame.opcode == WSOpcode.CLOSE:
+            self.close()
+        elif frame.opcode == WSOpcode.PONG:
+            if self.__pong_waiters is not None and not self.__pong_waiters.done():
+                self.__pong_waiters.set_result(True)
+        else:
+            await self.__recv_queue.put(frame)
 
     @property
     def closed(self):
@@ -352,8 +357,8 @@ class WSPortal:
                 print(f"{current_time} Server <-WS- {ip}")
                 return frame.data
 
-            result = frame.data
-            is_text = isinstance(result, str)
+            result = frame.raw_data
+            is_text = frame.opcode == WSOpcode.TEXT
 
             while True:
                 frame = await asyncio.wait_for(self.__recv_queue.get(), timeout=timeout)
@@ -362,20 +367,21 @@ class WSPortal:
                     self.close(1002)
                     raise WSRecvInvalidFrameError("Expected continuation frame")
 
-                continuation = frame.data
-                if is_text:
-                    if not isinstance(continuation, bytes):
-                        self.close(1002)
-                        raise WSRecvInvalidFrameError("Mixed frame types")
-                    result += continuation.decode("utf-8")
-                else:
-                    if not isinstance(continuation, bytes):
-                        self.close(1002)
-                        raise WSRecvInvalidFrameError("Mixed frame types")
-                    result += continuation
+                # Buffer the raw bytes; a multibyte character may be split
+                # across fragments and only decodes once the message is whole.
+                result += frame.raw_data
 
                 if frame.fin:
                     break
+
+            if is_text:
+                try:
+                    result = result.decode("utf-8")
+                except UnicodeDecodeError as err:
+                    self.close(1002)
+                    raise WSRecvInvalidFrameError(
+                        "Invalid UTF-8 in fragmented TEXT frame"
+                    ) from err
 
             current_time = datetime.now().strftime("%H:%M:%S")
             ip, _ = self.__client.getpeername()
@@ -446,10 +452,10 @@ class WSPortal:
         self.__send_frame(opcode=WSOpcode.CLOSE, payload=code.to_bytes(2, "big"))
 
         self.__closed = True
-        self.__client.close()
 
         current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = self.__client.getpeername()
+        self.__client.close()
 
         arrow = "-X->" if code == 1000 else "-!X!->"
 

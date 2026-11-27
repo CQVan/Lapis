@@ -37,6 +37,7 @@ class Lapis:
     __paths: dict
     __taken_endpoints: list[str]
     __protocols: list[type[Protocol]]
+    __baked_scripts: dict[pathlib.Path, dict]
 
     __slug_pattern = re.compile(r"\[[^\]]+\]")
     __path_pattern = re.compile(r"^\/([a-zA-Z0-9._-]+)(\/[a-zA-Z0-9._-]+)*$")
@@ -49,6 +50,7 @@ class Lapis:
         self.__paths = {}
         self.__taken_endpoints = []
         self.__protocols = []
+        self.__baked_scripts = {}
         self.__running = False
 
         self.__register_protocol(HTTP1Protocol)
@@ -135,13 +137,6 @@ class Lapis:
 
         self._bake_paths()
 
-    def _get_dynamic_dirs(self, directory: pathlib.Path):
-        return [
-            p
-            for p in directory.iterdir()
-            if p.is_dir() and p.name.startswith("[") and p.name.endswith("]")
-        ]
-
     def __validate_path(self, relative_path: pathlib.Path):
         posix_rel = relative_path.as_posix()
 
@@ -199,8 +194,11 @@ class Lapis:
             for part in relative_path.parts[:-1]:
                 current_level = current_level.setdefault(part, {})
 
-            # 4. Load the script
-            script_globals = runpy.run_path(str(path.absolute()))
+            # Load each API script once; re-baking routes must not execute it again.
+            absolute_path = path.absolute()
+            if absolute_path not in self.__baked_scripts:
+                self.__baked_scripts[absolute_path] = runpy.run_path(str(absolute_path))
+            script_globals = self.__baked_scripts[absolute_path]
 
             api_routes = {
                 f"/{k}": v
@@ -258,19 +256,26 @@ class Lapis:
     @staticmethod
     def _get_content_length(data: bytes) -> int:
         headers = data.split(b"\r\n\r\n", 1)[0]
+        content_lengths: list[int] = []
         for line in headers.split(b"\r\n")[1:]:
             if b":" not in line:
                 continue
             key, value = line.split(b":", 1)
             if key.strip().lower() == b"content-length":
-                try:
-                    content_length = int(value.strip())
-                except ValueError as exc:
-                    raise BadRequest("Invalid Content-Length") from exc
-                if content_length < 0:
-                    raise BadRequest("Invalid Content-Length")
-                return content_length
-        return 0
+                for item in value.split(b","):
+                    try:
+                        content_length = int(item.strip())
+                    except ValueError as exc:
+                        raise BadRequest("Invalid Content-Length") from exc
+                    if content_length < 0:
+                        raise BadRequest("Invalid Content-Length")
+                    content_lengths.append(content_length)
+        if content_lengths and any(
+            content_length != content_lengths[0]
+            for content_length in content_lengths[1:]
+        ):
+            raise BadRequest("Invalid conflicting Content-Length")
+        return content_lengths[0] if content_lengths else 0
 
     def _read_request_data(self, client: socket.socket) -> Optional[bytes]:
         data = b""
@@ -305,6 +310,12 @@ class Lapis:
                         Response(status_code=413, body="Request Entity Too Large"),
                     )
                     return None
+
+            if len(data) - header_end < content_length:
+                self.__send_response(
+                    client, Response(status_code=400, body="400 Bad Request")
+                )
+                return None
 
         return data
 
@@ -376,7 +387,8 @@ class Lapis:
             response: Response = Response(status_code=404, body="404 Not Found")
             self.__send_response(client, response)
 
-        except RuntimeError as e:
+        # Endpoint callbacks are user code; unexpected failures must return HTTP 500.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error handling request: {e}")
             response = Response(status_code=500, body="Internal Server Error")
             self.__send_response(client, response)

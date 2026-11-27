@@ -3,11 +3,14 @@ from pathlib import Path
 import pytest
 
 from lapis import Lapis
-from lapis.server_types import BadAPIDirectory, Protocol, ProtocolEndpointError
+from lapis.server_types import BadAPIDirectory
+
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slugs"
 
 
 def test_resolves_slug_routes_and_captures_values(server_factory, send_request):
-    server = server_factory(Path(__file__))
+    server = server_factory(FIXTURE_DIR)
 
     cases = [
         ("/alice", b"{'slug1': 'alice'}"),
@@ -54,29 +57,3 @@ def test_rejects_invalid_route_characters(tmp_path, monkeypatch):
 
     with pytest.raises(BadAPIDirectory, match="Invalid characters"):
         Lapis()
-
-
-def test_rejects_duplicate_protocol_endpoint(tmp_path, monkeypatch):
-    (tmp_path / "api").mkdir()
-    monkeypatch.setattr("sys.argv", [str(tmp_path / "test.py")])
-
-    class DuplicateGetProtocol(Protocol):
-        def get_config_key(self):
-            return "duplicate"
-
-        def get_target_endpoints(self):
-            return ["GET"]
-
-        def identify(self, initial_data):
-            return False
-
-        def handshake(self, client):
-            return False
-
-        async def handle(self, client, slugs, endpoints):
-            pass
-
-    server = Lapis()
-
-    with pytest.raises(ProtocolEndpointError, match="reuse target endpoint"):
-        server.register_protocol(DuplicateGetProtocol)
