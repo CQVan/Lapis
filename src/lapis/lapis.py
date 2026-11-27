@@ -57,7 +57,6 @@ class Lapis:
         self.__register_protocol(WebSocketProtocol)
 
         self._bake_paths()
-        print(self.__paths)
 
     def run(self, ip: str, port: int):
         """
@@ -221,9 +220,11 @@ class Lapis:
         self, current_level: dict, remaining_parts: tuple[str, ...], slugs: dict
     ) -> tuple[Optional[dict], dict]:
 
-        # Base case
+        # A partial route is not a match when another slug branch may fit.
         if not remaining_parts:
-            return (current_level, slugs) if current_level else (None, {})
+            if any(key.startswith("/") for key in current_level):
+                return current_level, slugs
+            return None, {}
 
         part = remaining_parts[0]
         next_parts = remaining_parts[1:]
